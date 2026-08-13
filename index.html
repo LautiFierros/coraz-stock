@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CORAZ - Stock en tiempo real</title>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; background:#0f1115; color:#e8e8e8; margin:0; padding:24px; }
+  h1 { font-size:20px; margin-bottom:4px; }
+  .sub { color:#9aa0a6; font-size:13px; margin-bottom:20px; }
+  .card { background:#1a1d24; border-radius:12px; padding:16px; margin-bottom:20px; }
+  button { background:#4f7cff; color:white; border:none; border-radius:8px; padding:10px 16px; font-size:14px; cursor:pointer; }
+  button:disabled { opacity:0.5; }
+  input { background:#0f1115; border:1px solid #333; color:#e8e8e8; border-radius:8px; padding:8px; font-size:14px; margin-right:8px; margin-bottom:8px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:#9aa0a6; font-weight:normal; padding:8px; border-bottom:1px solid #2a2d34; position:sticky; top:0; background:#1a1d24; }
+  td { padding:8px; border-bottom:1px solid #22252c; }
+  td.num { font-variant-numeric: tabular-nums; font-weight:600; }
+  tr.low td { color:#ff6b6b; }
+  .muted { color:#7a7f87; font-size:12px; }
+  #msg, #repoMsg { margin-top:10px; font-size:13px; white-space:pre-wrap; }
+  #tableWrap { max-height:60vh; overflow-y:auto; }
+  #search { width:100%; box-sizing:border-box; margin-bottom:12px; }
+</style>
+</head>
+<body>
+  <h1>Stock CORAZ - tiempo real</h1>
+  <div class="sub" id="subInfo">Cargando...</div>
+
+  <div class="card">
+    <button id="refreshBtn" onclick="refresh()">Refresh manual (chequear ventas nuevas)</button>
+    <div id="msg"></div>
+  </div>
+
+  <div class="card">
+    <b>Cargar reposicion</b>
+    <div style="margin-top:10px;">
+      <input id="repoSku" placeholder="SKU">
+      <input id="repoCantidad" placeholder="Cantidad" type="number" min="1">
+      <input id="repoNota" placeholder="Nota (opcional)">
+      <button onclick="reponer()">Sumar stock</button>
+    </div>
+    <div id="repoMsg"></div>
+  </div>
+
+  <div class="card">
+    <input id="search" placeholder="Buscar SKU..." oninput="filtrar()">
+    <div id="tableWrap">
+    <table>
+      <thead><tr><th>SKU</th><th>Stock</th><th>Ultima actualizacion</th></tr></thead>
+      <tbody id="tbody"><tr><td colspan="3">Cargando...</td></tr></tbody>
+    </table>
+    </div>
+  </div>
+
+<script>
+// Config: pegar acá la URL base del proyecto Supabase y las credenciales del dashboard
+const SUPABASE_BASE = 'https://kvewsxrfogosjwehookj.supabase.co/functions/v1';
+const AUTH = 'Basic ' + btoa('lauti:04n5akrLgbSaYb');
+
+let allRows = [];
+
+async function cargar() {
+  document.getElementById('tbody').innerHTML = '<tr><td colspan="3">Cargando...</td></tr>';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-list', { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || 'error desconocido');
+    allRows = data.stock;
+    document.getElementById('subInfo').textContent = data.count + ' SKUs';
+    render(allRows);
+  } catch (e) {
+    document.getElementById('tbody').innerHTML = '<tr><td colspan="3">Error cargando: ' + e + '</td></tr>';
+  }
+}
+
+function render(rows) {
+  const tbody = document.getElementById('tbody');
+  if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="3">Sin resultados.</td></tr>'; return; }
+  tbody.innerHTML = rows.map(r => `
+    <tr class="${r.stock_actual <= 0 ? 'low' : ''}">
+      <td>${r.sku}</td>
+      <td class="num">${r.stock_actual}</td>
+      <td class="muted">${new Date(r.updated_at).toLocaleString('es-AR')}</td>
+    </tr>`).join('');
+}
+
+function filtrar() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  if (!q) { render(allRows); return; }
+  render(allRows.filter(r => r.sku.toLowerCase().includes(q)));
+}
+
+async function refresh() {
+  const btn = document.getElementById('refreshBtn');
+  const msg = document.getElementById('msg');
+  btn.disabled = true;
+  msg.textContent = 'Consultando ventas nuevas en ML...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-sync-ventas', { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (data.ok) {
+      msg.textContent = 'Ordenes revisadas: ' + data.ordenes_encontradas + ' | Movimientos nuevos: ' + data.movimientos_venta_nuevos + ' | SKUs actualizados en ML: ' + (data.skus_actualizados_en_ml || []).join(', ');
+      await cargar();
+    } else {
+      msg.textContent = 'Error: ' + data.error;
+    }
+  } catch (e) {
+    msg.textContent = 'Error de red: ' + e;
+  }
+  btn.disabled = false;
+}
+
+async function reponer() {
+  const sku = document.getElementById('repoSku').value.trim();
+  const cantidad = parseInt(document.getElementById('repoCantidad').value, 10);
+  const nota = document.getElementById('repoNota').value.trim();
+  const msg = document.getElementById('repoMsg');
+  if (!sku || !cantidad || cantidad <= 0) { msg.textContent = 'Completa SKU y cantidad valida.'; return; }
+  msg.textContent = 'Guardando...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-reposicion', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sku, cantidad, nota })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      msg.textContent = 'Listo. ' + sku + ' ahora tiene ' + data.stock_actual + ' unidades (' + data.publicaciones_actualizadas + ' publicaciones actualizadas en ML).';
+      document.getElementById('repoSku').value = '';
+      document.getElementById('repoCantidad').value = '';
+      document.getElementById('repoNota').value = '';
+      await cargar();
+    } else {
+      msg.textContent = 'Error: ' + data.error;
+    }
+  } catch (e) {
+    msg.textContent = 'Error de red: ' + e;
+  }
+}
+
+cargar();
+</script>
+</body>
+</html>
