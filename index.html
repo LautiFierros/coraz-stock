@@ -453,6 +453,9 @@ async function aplicarSeleccionados() {
   } catch (e) {
     msg.textContent = 'Error de red: ' + e;
   }
+  btn.disabled = false;
+}
+
 const TIPO_LABELS = {
   publicacion_sin_sku: 'Publicaciones sin SKU cargado',
   publicacion_nueva: 'Publicaciones nuevas detectadas',
@@ -541,3 +544,4 @@ cargarAdvertencias();
 </script>
 </body>
 </html>
+
