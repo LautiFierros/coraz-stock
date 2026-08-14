@@ -35,11 +35,45 @@
   .mlLink { color:#4f7cff; text-decoration:none; font-size:12px; margin-left:8px; white-space:nowrap; }
   .mlLink:hover { text-decoration:underline; }
   .skuCell { display:flex; align-items:center; }
+  .expandBtn { background:#2a2d34; border:none; color:#9aa0a6; border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; width:auto; }
+  .pubRow td { background:#14161b; }
+  .pubTable { width:100%; font-size:12px; }
+  .pubTable td { padding:6px 8px; border-bottom:1px solid #1c1f26; }
+  .estadoTag { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; }
+  .estadoTag.active { background:#1e3a24; color:#5fd97a; }
+  .estadoTag.paused { background:#3a301e; color:#e8a94f; }
+  .fullTag { color:#7a7f87; font-size:10px; margin-left:4px; }
+  .toggleBtn { background:#2a2d34; border:none; color:#e8e8e8; border-radius:6px; padding:5px 10px; font-size:11px; cursor:pointer; width:auto; }
+  .toggleBtn:disabled { opacity: 0.4; }
+  .advItem { background:#1a1d24; border-left:3px solid #e8a94f; border-radius:6px; padding:10px 12px; margin-bottom:8px; }
+  .advItem.tipo_publicacion_sin_sku { border-color:#c1503e; }
+  .advItem.tipo_venta_sin_stock_inicial { border-color:#c1503e; }
+  .advItem.tipo_mla_cambio_sku { border-color:#e8a94f; }
+  .advItem.tipo_publicacion_nueva { border-color:#4f7cff; }
+  .advItem.tipo_kit_no_reconocido { border-color:#e8a94f; }
+  .advItem.tipo_sku_nuevo_sin_stock { border-color:#e8a94f; }
+  .advTitulo { font-weight:600; font-size:13px; margin-bottom:4px; }
+  .advDetalle { font-size:12px; color:#9aa0a6; }
+  .advAcciones { margin-top:8px; display:flex; gap:8px; }
+  .resolverBtn { background:#2a2d34; border:none; color:#9aa0a6; border-radius:6px; padding:5px 10px; font-size:11px; cursor:pointer; width:auto; }
+  .grupoAdv { margin-bottom:16px; }
+  .grupoAdvTitulo { font-size:13px; color:#e8e8e8; margin-bottom:8px; font-weight:600; }
+  .saludOk { color:#5fd97a; }
+  .saludMal { color:#ff6b6b; }
 </style>
 </head>
 <body>
   <h1>Stock CORAZ - tiempo real</h1>
   <div class="sub" id="subInfo">Cargando...</div>
+
+  <div class="card" id="advertenciasCard">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2 style="margin:0;">Advertencias <span id="advertenciasCount" class="badge pendiente">...</span></h2>
+      <button class="secondary" style="width:auto; padding:8px 14px; font-size:13px;" onclick="cargarAdvertencias()">Actualizar</button>
+    </div>
+    <div id="saludCron" class="muted" style="margin-top:8px;"></div>
+    <div id="advertenciasContent" style="margin-top:12px;"></div>
+  </div>
 
   <div class="card">
     <button id="refreshBtn" onclick="refresh()">Refresh manual (chequear ventas nuevas)</button>
@@ -99,8 +133,8 @@
     <input id="search" placeholder="Buscar SKU..." oninput="filtrar()">
     <div id="tableWrap">
     <table>
-      <thead><tr><th>SKU</th><th>Stock</th><th>Ultima actualizacion</th></tr></thead>
-      <tbody id="tbody"><tr><td colspan="3">Cargando...</td></tr></tbody>
+      <thead><tr><th>SKU</th><th>Stock</th><th>Ultima actualizacion</th><th></th></tr></thead>
+      <tbody id="tbody"><tr><td colspan="4">Cargando...</td></tr></tbody>
     </table>
     </div>
   </div>
@@ -144,7 +178,7 @@ function restaurarUrlMl() {
 async function cargar() {
   restaurarBusqueda();
   restaurarUrlMl();
-  document.getElementById('tbody').innerHTML = '<tr><td colspan="3">Cargando...</td></tr>';
+  document.getElementById('tbody').innerHTML = '<tr><td colspan="4">Cargando...</td></tr>';
   try {
     const resp = await fetch(SUPABASE_BASE + '/stock-list', { headers: { Authorization: AUTH } });
     const data = await resp.json();
@@ -153,19 +187,84 @@ async function cargar() {
     document.getElementById('subInfo').textContent = data.count + ' SKUs';
     filtrar();
   } catch (e) {
-    document.getElementById('tbody').innerHTML = '<tr><td colspan="3">Error cargando: ' + e + '</td></tr>';
+    document.getElementById('tbody').innerHTML = '<tr><td colspan="4">Error cargando: ' + e + '</td></tr>';
   }
 }
 
 function render(rows) {
   const tbody = document.getElementById('tbody');
-  if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="3">Sin resultados.</td></tr>'; return; }
+  if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="4">Sin resultados.</td></tr>'; return; }
   tbody.innerHTML = rows.map(r => `
     <tr class="${r.stock_actual <= 0 ? 'low' : ''}">
       <td><div class="skuCell">${r.sku}<a class="mlLink" href="${linkMl(r.sku)}" target="_blank" rel="noopener">ver en ML</a></div></td>
       <td class="num">${r.stock_actual}</td>
       <td class="muted">${new Date(r.updated_at).toLocaleString('es-AR')}</td>
+      <td><button class="expandBtn" onclick="togglePublicaciones('${r.sku}', this)">Publicaciones</button></td>
+    </tr>
+    <tr class="pubRow" id="pubRow-${cssSafe(r.sku)}" style="display:none;">
+      <td colspan="4"><div id="pubContent-${cssSafe(r.sku)}" class="muted">Cargando...</div></td>
     </tr>`).join('');
+}
+
+function cssSafe(sku) {
+  return sku.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+async function togglePublicaciones(sku, btn) {
+  const row = document.getElementById('pubRow-' + cssSafe(sku));
+  const visible = row.style.display !== 'none';
+  if (visible) { row.style.display = 'none'; return; }
+  row.style.display = 'table-row';
+
+  const content = document.getElementById('pubContent-' + cssSafe(sku));
+  content.innerHTML = 'Cargando...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-publicaciones?sku=' + encodeURIComponent(sku), { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (!data.ok) { content.innerHTML = 'Error: ' + data.error; return; }
+    if (data.publicaciones.length === 0) { content.innerHTML = 'Sin publicaciones mapeadas para este SKU.'; return; }
+
+    content.innerHTML = '<table class="pubTable">' + data.publicaciones.map(p => `
+      <tr id="pub-${p.item_id}">
+        <td><span class="estadoTag ${p.status}">${p.status === 'active' ? 'activa' : 'pausada'}</span>${p.es_full ? '<span class="fullTag">FULL</span>' : ''}</td>
+        <td>${p.title || p.item_id}</td>
+        <td><a class="mlLink" href="https://articulo.mercadolibre.com.ar/${p.item_id.replace('MLA','MLA-')}" target="_blank" rel="noopener">${p.item_id}</a></td>
+        <td>
+          ${p.status === 'active'
+            ? `<button class="toggleBtn" onclick="cambiarEstado('${p.item_id}','paused', this)">Pausar</button>`
+            : `<button class="toggleBtn" onclick="cambiarEstado('${p.item_id}','active', this)">Reactivar</button>`}
+        </td>
+      </tr>`).join('') + '</table>';
+  } catch (e) {
+    content.innerHTML = 'Error de red: ' + e;
+  }
+}
+
+async function cambiarEstado(itemId, nuevoEstado, btn) {
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = '...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-publicacion-estado', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: itemId, estado: nuevoEstado })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Error: ' + data.error); btn.disabled = false; btn.textContent = original; return; }
+
+    const tr = document.getElementById('pub-' + itemId);
+    const tag = tr.querySelector('.estadoTag');
+    tag.className = 'estadoTag ' + nuevoEstado;
+    tag.textContent = nuevoEstado === 'active' ? 'activa' : 'pausada';
+    btn.outerHTML = nuevoEstado === 'active'
+      ? `<button class="toggleBtn" onclick="cambiarEstado('${itemId}','paused', this)">Pausar</button>`
+      : `<button class="toggleBtn" onclick="cambiarEstado('${itemId}','active', this)">Reactivar</button>`;
+  } catch (e) {
+    alert('Error de red: ' + e);
+    btn.disabled = false;
+    btn.textContent = original;
+  }
 }
 
 function filtrar() {
@@ -354,10 +453,91 @@ async function aplicarSeleccionados() {
   } catch (e) {
     msg.textContent = 'Error de red: ' + e;
   }
-  btn.disabled = false;
+const TIPO_LABELS = {
+  publicacion_sin_sku: 'Publicaciones sin SKU cargado',
+  publicacion_nueva: 'Publicaciones nuevas detectadas',
+  mla_cambio_sku: 'Publicaciones que cambiaron de SKU',
+  sku_nuevo_sin_stock: 'SKUs sin stock inicial',
+  kit_no_reconocido: 'SKUs compuestos no reconocidos como kit',
+  venta_sin_stock_inicial: 'Ventas sobre SKU sin stock (no se empujaron a ML)',
+};
+
+async function cargarAdvertencias() {
+  const content = document.getElementById('advertenciasContent');
+  const countEl = document.getElementById('advertenciasCount');
+  const saludEl = document.getElementById('saludCron');
+  content.innerHTML = 'Cargando...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-advertencias', { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (!data.ok) { content.innerHTML = 'Error: ' + data.error; return; }
+
+    countEl.textContent = data.total;
+    countEl.className = 'badge ' + (data.total === 0 ? 'aplicado' : 'parcial');
+
+    if (Array.isArray(data.salud_cron)) {
+      saludEl.innerHTML = data.salud_cron.map(j => {
+        const fallo = (j.fallas_ultimas_24h || 0) > 0;
+        const ultima = j.ultima_corrida_ok ? new Date(j.ultima_corrida_ok).toLocaleString('es-AR') : 'nunca';
+        return `<span class="${fallo ? 'saludMal' : 'saludOk'}">${fallo ? '\u26A0' : '\u2713'} ${j.jobname}: ultima OK ${ultima}${fallo ? ' | ' + j.fallas_ultimas_24h + ' fallas en 24h' : ''}</span>`;
+      }).join(' &nbsp;|&nbsp; ');
+    }
+
+    if (data.total === 0) {
+      content.innerHTML = '<div class="muted">Sin advertencias abiertas. Todo en orden.</div>';
+      return;
+    }
+
+    const porTipo = {};
+    for (const a of data.advertencias) {
+      if (!porTipo[a.tipo]) porTipo[a.tipo] = [];
+      porTipo[a.tipo].push(a);
+    }
+
+    content.innerHTML = Object.entries(porTipo).map(([tipo, items]) => `
+      <div class="grupoAdv">
+        <div class="grupoAdvTitulo">${TIPO_LABELS[tipo] || tipo} (${items.length})</div>
+        ${items.map(a => `
+          <div class="advItem tipo_${a.tipo}">
+            <div class="advTitulo">${a.sku ? 'SKU: ' + a.sku : ''} ${a.item_id ? (a.sku ? ' — ' : '') + a.item_id : ''}</div>
+            <div class="advDetalle">${escapeHtml(JSON.stringify(a.detalle))}</div>
+            <div class="advDetalle" style="margin-top:4px;">Detectado: ${new Date(a.created_at).toLocaleString('es-AR')}</div>
+            <div class="advAcciones">
+              ${a.item_id ? `<a class="mlLink" href="https://articulo.mercadolibre.com.ar/${a.item_id.replace('MLA','MLA-')}" target="_blank" rel="noopener">ver publicacion</a>` : ''}
+              <button class="resolverBtn" onclick="resolverAdvertencia(${a.id}, this)">Marcar resuelta</button>
+            </div>
+          </div>`).join('')}
+      </div>`).join('');
+  } catch (e) {
+    content.innerHTML = 'Error de red: ' + e;
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+async function resolverAdvertencia(id, btn) {
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-advertencia-resolver', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Error: ' + data.error); btn.disabled = false; btn.textContent = 'Marcar resuelta'; return; }
+    await cargarAdvertencias();
+  } catch (e) {
+    alert('Error de red: ' + e);
+    btn.disabled = false;
+    btn.textContent = 'Marcar resuelta';
+  }
 }
 
 cargar();
+cargarAdvertencias();
 </script>
 </body>
 </html>
