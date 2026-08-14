@@ -4,12 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CORAZ - Stock en tiempo real</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   body { font-family: -apple-system, Arial, sans-serif; background:#0f1115; color:#e8e8e8; margin:0; padding:24px; }
   h1 { font-size:20px; margin-bottom:4px; }
+  h2 { font-size:15px; margin:0 0 10px; }
   .sub { color:#9aa0a6; font-size:13px; margin-bottom:20px; }
   .card { background:#1a1d24; border-radius:12px; padding:16px; margin-bottom:20px; }
   button { background:#4f7cff; color:white; border:none; border-radius:8px; padding:10px 16px; font-size:14px; cursor:pointer; }
+  button.secondary { background:#2a2d34; }
+  button.danger { background:#c1503e; }
   button:disabled { opacity:0.5; }
   input { background:#0f1115; border:1px solid #333; color:#e8e8e8; border-radius:8px; padding:8px; font-size:14px; margin-right:8px; margin-bottom:8px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
@@ -17,10 +21,20 @@
   td { padding:8px; border-bottom:1px solid #22252c; }
   td.num { font-variant-numeric: tabular-nums; font-weight:600; }
   tr.low td { color:#ff6b6b; }
+  tr.falta td.diff { color:#ff6b6b; }
+  tr.sobra td.diff { color:#5fd97a; }
   .muted { color:#7a7f87; font-size:12px; }
-  #msg, #repoMsg { margin-top:10px; font-size:13px; white-space:pre-wrap; }
-  #tableWrap { max-height:60vh; overflow-y:auto; }
+  #msg, #repoMsg, #conteoMsg { margin-top:10px; font-size:13px; white-space:pre-wrap; }
+  #tableWrap, #diffWrap { max-height:60vh; overflow-y:auto; }
   #search { width:100%; box-sizing:border-box; margin-bottom:12px; }
+  .fileRow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; margin-left:6px; }
+  .badge.aplicado { background:#1e3a24; color:#5fd97a; }
+  .badge.parcial { background:#3a301e; color:#e8a94f; }
+  .badge.pendiente { background:#2a2d34; color:#9aa0a6; }
+  .mlLink { color:#4f7cff; text-decoration:none; font-size:12px; margin-left:8px; white-space:nowrap; }
+  .mlLink:hover { text-decoration:underline; }
+  .skuCell { display:flex; align-items:center; }
 </style>
 </head>
 <body>
@@ -30,6 +44,36 @@
   <div class="card">
     <button id="refreshBtn" onclick="refresh()">Refresh manual (chequear ventas nuevas)</button>
     <div id="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Conteo fisico semanal (sabados)</h2>
+    <div class="fileRow">
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+      <button onclick="procesarArchivo()">Generar reporte de diferencias</button>
+    </div>
+    <div class="muted" style="margin-top:8px;">El archivo debe tener columnas <b>SKU</b> y <b>Cantidad</b> (nombres de columna flexibles, primeras dos columnas se usan si no matchea por nombre).</div>
+    <div id="conteoMsg"></div>
+
+    <div id="diffSection" style="display:none; margin-top:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div id="diffSummary"></div>
+        <div>
+          <button class="secondary" onclick="toggleTodos(true)">Marcar todos</button>
+          <button class="secondary" onclick="toggleTodos(false)">Desmarcar todos</button>
+        </div>
+      </div>
+      <div id="diffWrap">
+        <table>
+          <thead><tr><th></th><th>SKU</th><th>Sistema</th><th>Contado</th><th>Diferencia</th></tr></thead>
+          <tbody id="diffTbody"></tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;">
+        <button onclick="aplicarSeleccionados()" id="aplicarBtn">Aplicar seleccionados</button>
+        <span class="muted" id="conteoEstadoBadge"></span>
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -44,6 +88,14 @@
   </div>
 
   <div class="card">
+    <b>Configuracion</b>
+    <div class="muted" style="margin-top:6px; margin-bottom:10px;">URL de busqueda en Mercado Libre. Usa <code>{SKU}</code> donde deba ir el codigo. Si ML cambia el formato, editala aca sin tocar el archivo.</div>
+    <input id="mlUrlInput" style="width:100%; box-sizing:border-box;">
+    <button class="secondary" style="width:auto; padding:8px 14px; font-size:13px;" onclick="guardarUrlMl()">Guardar</button>
+    <span class="muted" id="mlUrlMsg" style="margin-left:8px;"></span>
+  </div>
+
+  <div class="card">
     <input id="search" placeholder="Buscar SKU..." oninput="filtrar()">
     <div id="tableWrap">
     <table>
@@ -54,13 +106,44 @@
   </div>
 
 <script>
-// Config: pegar acá la URL base del proyecto Supabase y las credenciales del dashboard
 const SUPABASE_BASE = 'https://kvewsxrfogosjwehookj.supabase.co/functions/v1';
 const AUTH = 'Basic ' + btoa('lauti:04n5akrLgbSaYb');
+const ML_URL_DEFAULT = 'https://vendedores.mercadolibre.com.ar/publicaciones?page=1&sort=DEFAULT&search={SKU}';
+const ML_URL_STORAGE_KEY = 'coraz_stock_ml_url_template';
+const SEARCH_STORAGE_KEY = 'coraz_stock_busqueda';
 
 let allRows = [];
+let conteoActual = null;
+
+function getUrlMlTemplate() {
+  return localStorage.getItem(ML_URL_STORAGE_KEY) || ML_URL_DEFAULT;
+}
+
+function linkMl(sku) {
+  const template = getUrlMlTemplate();
+  const skuCodificado = encodeURIComponent(sku);
+  if (template.includes('{SKU}')) return template.split('{SKU}').join(skuCodificado);
+  // Sin placeholder: se asume que el SKU va al final, como antes
+  return template + skuCodificado;
+}
+
+function guardarUrlMl() {
+  const valor = document.getElementById('mlUrlInput').value.trim();
+  const msg = document.getElementById('mlUrlMsg');
+  if (!valor) { msg.textContent = 'No puede estar vacio.'; return; }
+  localStorage.setItem(ML_URL_STORAGE_KEY, valor);
+  msg.textContent = 'Guardado.';
+  filtrar();
+  setTimeout(() => { msg.textContent = ''; }, 2000);
+}
+
+function restaurarUrlMl() {
+  document.getElementById('mlUrlInput').value = getUrlMlTemplate();
+}
 
 async function cargar() {
+  restaurarBusqueda();
+  restaurarUrlMl();
   document.getElementById('tbody').innerHTML = '<tr><td colspan="3">Cargando...</td></tr>';
   try {
     const resp = await fetch(SUPABASE_BASE + '/stock-list', { headers: { Authorization: AUTH } });
@@ -68,7 +151,7 @@ async function cargar() {
     if (!data.ok) throw new Error(data.error || 'error desconocido');
     allRows = data.stock;
     document.getElementById('subInfo').textContent = data.count + ' SKUs';
-    render(allRows);
+    filtrar();
   } catch (e) {
     document.getElementById('tbody').innerHTML = '<tr><td colspan="3">Error cargando: ' + e + '</td></tr>';
   }
@@ -79,16 +162,22 @@ function render(rows) {
   if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="3">Sin resultados.</td></tr>'; return; }
   tbody.innerHTML = rows.map(r => `
     <tr class="${r.stock_actual <= 0 ? 'low' : ''}">
-      <td>${r.sku}</td>
+      <td><div class="skuCell">${r.sku}<a class="mlLink" href="${linkMl(r.sku)}" target="_blank" rel="noopener">ver en ML</a></div></td>
       <td class="num">${r.stock_actual}</td>
       <td class="muted">${new Date(r.updated_at).toLocaleString('es-AR')}</td>
     </tr>`).join('');
 }
 
 function filtrar() {
-  const q = document.getElementById('search').value.trim().toLowerCase();
+  const q = document.getElementById('search').value.trim();
+  localStorage.setItem(SEARCH_STORAGE_KEY, q);
   if (!q) { render(allRows); return; }
-  render(allRows.filter(r => r.sku.toLowerCase().includes(q)));
+  render(allRows.filter(r => r.sku.toLowerCase().includes(q.toLowerCase())));
+}
+
+function restaurarBusqueda() {
+  const guardada = localStorage.getItem(SEARCH_STORAGE_KEY);
+  if (guardada) document.getElementById('search').value = guardada;
 }
 
 async function refresh() {
@@ -137,6 +226,135 @@ async function reponer() {
   } catch (e) {
     msg.textContent = 'Error de red: ' + e;
   }
+}
+
+function encontrarColumnas(headers) {
+  const norm = headers.map(h => String(h).trim().toLowerCase());
+  let idxSku = norm.findIndex(h => h.includes('sku'));
+  let idxCant = norm.findIndex(h => h.includes('cant') || h.includes('stock') || h.includes('unidad'));
+  if (idxSku === -1) idxSku = 0;
+  if (idxCant === -1) idxCant = 1;
+  return { idxSku, idxCant };
+}
+
+async function procesarArchivo() {
+  const fileInput = document.getElementById('fileInput');
+  const msg = document.getElementById('conteoMsg');
+  if (!fileInput.files || fileInput.files.length === 0) { msg.textContent = 'Elegi un archivo primero.'; return; }
+
+  msg.textContent = 'Leyendo archivo...';
+  try {
+    const file = fileInput.files[0];
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    if (rows.length < 2) { msg.textContent = 'El archivo no tiene filas de datos.'; return; }
+
+    const headers = rows[0];
+    const { idxSku, idxCant } = encontrarColumnas(headers);
+
+    const filas = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length === 0) continue;
+      const sku = row[idxSku];
+      const cantidad = row[idxCant];
+      if (sku === undefined || sku === null || String(sku).trim() === '') continue;
+      filas.push({ sku: String(sku).trim(), cantidad: Number(cantidad) });
+    }
+
+    if (filas.length === 0) { msg.textContent = 'No se encontraron filas validas (SKU + cantidad).'; return; }
+
+    msg.textContent = 'Procesando ' + filas.length + ' filas contra el sistema...';
+
+    const resp = await fetch(SUPABASE_BASE + '/stock-conteo-preview', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filas })
+    });
+    const data = await resp.json();
+    if (!data.ok) { msg.textContent = 'Error: ' + data.error; return; }
+
+    conteoActual = data;
+    msg.textContent = data.total_contados + ' SKUs contados, ' + data.total_diferencias + ' con diferencia.' +
+      (data.sin_match_en_sistema.length > 0 ? ' SKUs sin match en sistema: ' + data.sin_match_en_sistema.join(', ') : '');
+    renderDiferencias(data);
+  } catch (e) {
+    msg.textContent = 'Error procesando archivo: ' + e;
+  }
+}
+
+function renderDiferencias(data) {
+  const section = document.getElementById('diffSection');
+  const tbody = document.getElementById('diffTbody');
+  const summary = document.getElementById('diffSummary');
+
+  if (data.diferencias.length === 0) {
+    section.style.display = 'block';
+    summary.textContent = 'Sin diferencias. Nada para aplicar.';
+    tbody.innerHTML = '';
+    return;
+  }
+
+  section.style.display = 'block';
+  summary.textContent = data.total_diferencias + ' diferencias encontradas (conteo ' + data.conteo_id.slice(0, 8) + '...)';
+
+  tbody.innerHTML = data.diferencias.map(d => {
+    const cls = d.diferencia < 0 ? 'falta' : 'sobra';
+    return `<tr class="${cls}" data-sku="${d.sku}">
+      <td><input type="checkbox" class="chkDiff" checked></td>
+      <td>${d.sku}</td>
+      <td class="num">${d.stock_sistema}</td>
+      <td class="num">${d.stock_contado}</td>
+      <td class="num diff">${d.diferencia > 0 ? '+' : ''}${d.diferencia}</td>
+    </tr>`;
+  }).join('');
+}
+
+function toggleTodos(marcar) {
+  document.querySelectorAll('.chkDiff').forEach(chk => { chk.checked = marcar; });
+}
+
+async function aplicarSeleccionados() {
+  if (!conteoActual) return;
+  const msg = document.getElementById('conteoMsg');
+  const filas = document.querySelectorAll('#diffTbody tr');
+  const skus = [];
+  filas.forEach(tr => {
+    const chk = tr.querySelector('.chkDiff');
+    if (chk.checked) skus.push(tr.getAttribute('data-sku'));
+  });
+
+  if (skus.length === 0) { msg.textContent = 'No marcaste ningun SKU para aplicar.'; return; }
+
+  const btn = document.getElementById('aplicarBtn');
+  btn.disabled = true;
+  msg.textContent = 'Aplicando ' + skus.length + ' ajustes...';
+
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-conteo-aplicar', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conteo_id: conteoActual.conteo_id, skus_a_aplicar: skus })
+    });
+    const data = await resp.json();
+    if (!data.ok) { msg.textContent = 'Error: ' + data.error; btn.disabled = false; return; }
+
+    msg.textContent = 'Aplicado: ' + data.aplicadas + ' SKUs actualizados (' + data.skus_actualizados.join(', ') + '). Estado del conteo: ' + data.estado_conteo + '.';
+    document.getElementById('conteoEstadoBadge').innerHTML = '<span class="badge ' + data.estado_conteo + '">' + data.estado_conteo + '</span>';
+
+    skus.forEach(sku => {
+      const row = document.querySelector('#diffTbody tr[data-sku="' + sku + '"]');
+      if (row) row.remove();
+    });
+
+    await cargar();
+  } catch (e) {
+    msg.textContent = 'Error de red: ' + e;
+  }
+  btn.disabled = false;
 }
 
 cargar();
