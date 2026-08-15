@@ -43,6 +43,10 @@
   .estadoTag { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; }
   .estadoTag.active { background:#1e3a24; color:#5fd97a; }
   .estadoTag.paused { background:#3a301e; color:#e8a94f; }
+  .estadoTag.under_review { background:#3a1e1e; color:#ff8f70; }
+  .estadoTag.closed { background:#2a2d34; color:#7a7f87; }
+  .estadoTag.inactive { background:#2a2d34; color:#7a7f87; }
+  .estadoTag.payment_required { background:#3a1e1e; color:#ff8f70; }
   .fullTag { color:#7a7f87; font-size:10px; margin-left:4px; }
   .toggleBtn { background:#2a2d34; border:none; color:#e8e8e8; border-radius:6px; padding:5px 10px; font-size:11px; cursor:pointer; width:auto; }
   .toggleBtn:disabled { opacity: 0.4; }
@@ -256,6 +260,12 @@ async function cambiarEstadoMasivo(sku, estado, btn) {
   btn.textContent = original;
 }
 
+const ESTADO_TEXTO = {
+  active: 'activa', paused: 'pausada', under_review: 'en revision',
+  closed: 'cerrada', inactive: 'inactiva', payment_required: 'pago pendiente',
+};
+function textoEstado(status) { return ESTADO_TEXTO[status] || status; }
+
 async function togglePublicaciones(sku, btn) {
   const row = document.getElementById('pubRow-' + cssSafe(sku));
   const visible = row.style.display !== 'none';
@@ -272,13 +282,15 @@ async function togglePublicaciones(sku, btn) {
 
     content.innerHTML = '<table class="pubTable">' + data.publicaciones.map(p => `
       <tr id="pub-${p.item_id}" data-sku="${sku}">
-        <td><span class="estadoTag ${p.status}">${p.status === 'active' ? 'activa' : 'pausada'}</span>${p.es_full ? '<span class="fullTag">FULL</span>' : ''}</td>
+        <td><span class="estadoTag ${p.status}">${textoEstado(p.status)}</span>${p.es_full ? '<span class="fullTag">FULL</span>' : ''}${p.status === 'under_review' ? '<span class="fullTag">requiere tu revision en ML</span>' : ''}</td>
         <td>${p.title || p.item_id}</td>
         <td><a class="mlLink" href="https://articulo.mercadolibre.com.ar/${p.item_id.replace('MLA','MLA-')}" target="_blank" rel="noopener">${p.item_id}</a></td>
         <td>
           ${p.status === 'active'
             ? `<button class="toggleBtn" onclick="cambiarEstado('${p.item_id}','paused', this)">Pausar</button>`
-            : `<button class="toggleBtn" onclick="cambiarEstado('${p.item_id}','active', this)">Reactivar</button>`}
+            : p.status === 'paused'
+              ? `<button class="toggleBtn" onclick="cambiarEstado('${p.item_id}','active', this)">Reactivar</button>`
+              : `<span class="muted">Resolver en ML</span>`}
         </td>
       </tr>`).join('') + '</table>';
   } catch (e) {
@@ -530,6 +542,7 @@ const TIPO_LABELS = {
   sku_nuevo_sin_stock: 'SKUs sin stock inicial',
   kit_no_reconocido: 'SKUs compuestos no reconocidos como kit',
   venta_sin_stock_inicial: 'Ventas sobre SKU sin stock (no se empujaron a ML)',
+  publicacion_estado_atipico: 'Publicaciones en revision, cerradas o con problema en ML',
 };
 
 async function cargarAdvertencias() {
