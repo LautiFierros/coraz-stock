@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CORAZ - Stock en tiempo real</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; background:#0f1115; color:#e8e8e8; margin:0; padding:24px; }
+  h1 { font-size:20px; margin-bottom:4px; }
+  h2 { font-size:15px; margin:0 0 10px; }
+  .sub { color:#9aa0a6; font-size:13px; margin-bottom:20px; }
+  .card { background:#1a1d24; border-radius:12px; padding:16px; margin-bottom:20px; }
+  button { background:#4f7cff; color:white; border:none; border-radius:8px; padding:10px 16px; font-size:14px; cursor:pointer; }
+  button.secondary { background:#2a2d34; }
+  button.danger { background:#c1503e; }
+  button:disabled { opacity:0.5; }
+  input { background:#0f1115; border:1px solid #333; color:#e8e8e8; border-radius:8px; padding:8px; font-size:14px; margin-right:8px; margin-bottom:8px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:#9aa0a6; font-weight:normal; padding:8px; border-bottom:1px solid #2a2d34; position:sticky; top:0; background:#1a1d24; }
+  td { padding:8px; border-bottom:1px solid #22252c; }
+  td.num { font-variant-numeric: tabular-nums; font-weight:600; }
+  tr.low td { color:#ff6b6b; }
+  tr.falta td.diff { color:#ff6b6b; }
+  tr.sobra td.diff { color:#5fd97a; }
+  .muted { color:#7a7f87; font-size:12px; }
+  #msg, #repoMsg, #conteoMsg { margin-top:10px; font-size:13px; white-space:pre-wrap; }
+  #tableWrap, #diffWrap { max-height:60vh; overflow-y:auto; }
+  #search { width:100%; box-sizing:border-box; margin-bottom:12px; }
+  .fileRow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; margin-left:6px; }
+  .badge.aplicado { background:#1e3a24; color:#5fd97a; }
+  .badge.parcial { background:#3a301e; color:#e8a94f; }
+  .badge.pendiente { background:#2a2d34; color:#9aa0a6; }
+  .mlLink { color:#4f7cff; text-decoration:none; font-size:12px; margin-left:8px; white-space:nowrap; }
+  .mlLink:hover { text-decoration:underline; }
+  .skuCell { display:flex; align-items:center; }
+  .expandBtn { background:#2a2d34; border:none; color:#9aa0a6; border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; width:auto; }
+  .pubActions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .pubRow td { background:#14161b; }
+  .pubTable { width:100%; font-size:12px; }
+  .pubTable td { padding:6px 8px; border-bottom:1px solid #1c1f26; }
+  .estadoTag { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; }
+  .estadoTag.active { background:#1e3a24; color:#5fd97a; }
+  .estadoTag.paused { background:#3a301e; color:#e8a94f; }
+  .estadoTag.under_review { background:#3a1e1e; color:#ff8f70; }
+  .estadoTag.closed { background:#2a2d34; color:#7a7f87; }
+  .estadoTag.inactive { background:#2a2d34; color:#7a7f87; }
+  .estadoTag.payment_required { background:#3a1e1e; color:#ff8f70; }
+  .fullTag { color:#7a7f87; font-size:10px; margin-left:4px; }
+  .toggleBtn { background:#2a2d34; border:none; color:#e8e8e8; border-radius:6px; padding:5px 10px; font-size:11px; cursor:pointer; width:auto; }
+  .toggleBtn:disabled { opacity: 0.4; }
+  .advItem { background:#1a1d24; border-left:3px solid #e8a94f; border-radius:6px; padding:10px 12px; margin-bottom:8px; }
+  .advItem.tipo_publicacion_sin_sku { border-color:#c1503e; }
+  .advItem.tipo_venta_sin_stock_inicial { border-color:#c1503e; }
+  .advItem.tipo_mla_cambio_sku { border-color:#e8a94f; }
+  .advItem.tipo_publicacion_nueva { border-color:#4f7cff; }
+  .advItem.tipo_kit_no_reconocido { border-color:#e8a94f; }
+  .advItem.tipo_sku_nuevo_sin_stock { border-color:#e8a94f; }
+  .advTitulo { font-weight:600; font-size:13px; margin-bottom:4px; }
+  .advDetalle { font-size:12px; color:#9aa0a6; }
+  .advAcciones { margin-top:8px; display:flex; gap:8px; }
+  .resolverBtn { background:#2a2d34; border:none; color:#9aa0a6; border-radius:6px; padding:5px 10px; font-size:11px; cursor:pointer; width:auto; }
+  .grupoAdv { margin-bottom:16px; }
+  .grupoAdvTitulo { font-size:13px; color:#e8e8e8; margin-bottom:8px; font-weight:600; }
+  .saludOk { color:#5fd97a; }
+  .saludMal { color:#ff6b6b; }
+</style>
+</head>
+<body>
+  <h1>Stock CORAZ - tiempo real</h1>
+  <div class="sub" id="subInfo">Cargando...</div>
+
+  <div class="card" id="advertenciasCard">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2 style="margin:0;">Advertencias <span id="advertenciasCount" class="badge pendiente">...</span></h2>
+      <button class="secondary" style="width:auto; padding:8px 14px; font-size:13px;" onclick="cargarAdvertencias()">Actualizar</button>
+    </div>
+    <div id="saludCron" class="muted" style="margin-top:8px;"></div>
+    <div id="advertenciasContent" style="margin-top:12px;"></div>
+  </div>
+
+  <div class="card">
+    <button id="refreshBtn" onclick="refresh()">Refresh manual (chequear ventas nuevas)</button>
+    <div id="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Conteo fisico semanal (sabados)</h2>
+    <div class="fileRow">
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+      <button onclick="procesarArchivo()">Generar reporte de diferencias</button>
+    </div>
+    <div class="muted" style="margin-top:8px;">El archivo debe tener columnas <b>SKU</b> y <b>Cantidad</b> (nombres de columna flexibles, primeras dos columnas se usan si no matchea por nombre).</div>
+    <div id="conteoMsg"></div>
+
+    <div id="diffSection" style="display:none; margin-top:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div id="diffSummary"></div>
+        <div>
+          <button class="secondary" onclick="toggleTodos(true)">Marcar todos</button>
+          <button class="secondary" onclick="toggleTodos(false)">Desmarcar todos</button>
+        </div>
+      </div>
+      <div id="diffWrap">
+        <table>
+          <thead><tr><th></th><th>SKU</th><th>Sistema</th><th>Contado</th><th>Diferencia</th></tr></thead>
+          <tbody id="diffTbody"></tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;">
+        <button onclick="aplicarSeleccionados()" id="aplicarBtn">Aplicar seleccionados</button>
+        <span class="muted" id="conteoEstadoBadge"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <b>Cargar reposicion</b>
+    <div style="margin-top:10px;">
+      <input id="repoSku" placeholder="SKU">
+      <input id="repoCantidad" placeholder="Cantidad" type="number" min="1">
+      <input id="repoNota" placeholder="Nota (opcional)">
+      <button onclick="reponer()">Sumar stock</button>
+    </div>
+    <div id="repoMsg"></div>
+  </div>
+
+  <div class="card">
+    <b>Configuracion</b>
+    <div class="muted" style="margin-top:6px; margin-bottom:10px;">URL de busqueda en Mercado Libre. Usa <code>{SKU}</code> donde deba ir el codigo. Si ML cambia el formato, editala aca sin tocar el archivo.</div>
+    <input id="mlUrlInput" style="width:100%; box-sizing:border-box;">
+    <button class="secondary" style="width:auto; padding:8px 14px; font-size:13px;" onclick="guardarUrlMl()">Guardar</button>
+    <span class="muted" id="mlUrlMsg" style="margin-left:8px;"></span>
+
+    <div class="muted" style="margin-top:16px; margin-bottom:10px;">URL de edicion de publicacion en Mercado Libre. Usa <code>{MLA}</code> donde deba ir el ID de la publicacion.</div>
+    <input id="mlEditUrlInput" style="width:100%; box-sizing:border-box;">
+    <button class="secondary" style="width:auto; padding:8px 14px; font-size:13px;" onclick="guardarUrlMlEdit()">Guardar</button>
+    <span class="muted" id="mlEditUrlMsg" style="margin-left:8px;"></span>
+  </div>
+
+  <div class="card">
+    <input id="search" placeholder="Buscar SKU..." oninput="filtrar()">
+    <div id="tableWrap">
+    <table>
+      <thead><tr><th>SKU</th><th>Stock</th><th>Ultima actualizacion</th><th></th></tr></thead>
+      <tbody id="tbody"><tr><td colspan="4">Cargando...</td></tr></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card" id="fullCard">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2 style="margin:0;">Stock en Full <span id="fullCount" class="badge pendiente">...</span></h2>
+      <button class="secondary" style="width:auto; padding:8px 14px; font-size:13px;" onclick="cargarFull()">Actualizar</button>
+    </div>
+    <div class="muted" style="margin-top:6px;">El stock de estas publicaciones lo gestiona ML segun lo que le mandaste al deposito, no lo controla este sistema. Ordenadas de menor a mayor stock.</div>
+    <div id="fullContent" style="margin-top:12px;"></div>
+  </div>
+
+<script>
+const SUPABASE_BASE = 'https://kvewsxrfogosjwehookj.supabase.co/functions/v1';
+const AUTH = 'Basic ' + btoa('lauti:04n5akrLgbSaYb');
+const ML_URL_DEFAULT = 'https://vendedores.mercadolibre.com.ar/publicaciones?page=1&sort=DEFAULT&search={SKU}';
+const ML_URL_STORAGE_KEY = 'coraz_stock_ml_url_template';
+const ML_EDIT_URL_DEFAULT = 'https://www.mercadolibre.com.ar/publicaciones/{MLA}/detalle';
+const ML_EDIT_URL_STORAGE_KEY = 'coraz_stock_ml_edit_url_template';
+const SEARCH_STORAGE_KEY = 'coraz_stock_busqueda';
+
+let allRows = [];
+let conteoActual = null;
+
+function getUrlMlTemplate() {
+  return localStorage.getItem(ML_URL_STORAGE_KEY) || ML_URL_DEFAULT;
+}
+
+function linkMl(sku) {
+  const template = getUrlMlTemplate();
+  const skuCodificado = encodeURIComponent(sku);
+  if (template.includes('{SKU}')) return template.split('{SKU}').join(skuCodificado);
+  // Sin placeholder: se asume que el SKU va al final, como antes
+  return template + skuCodificado;
+}
+
+function guardarUrlMl() {
+  const valor = document.getElementById('mlUrlInput').value.trim();
+  const msg = document.getElementById('mlUrlMsg');
+  if (!valor) { msg.textContent = 'No puede estar vacio.'; return; }
+  localStorage.setItem(ML_URL_STORAGE_KEY, valor);
+  msg.textContent = 'Guardado.';
+  filtrar();
+  setTimeout(() => { msg.textContent = ''; }, 2000);
+}
+
+function restaurarUrlMl() {
+  document.getElementById('mlUrlInput').value = getUrlMlTemplate();
+}
+
+function getUrlMlEditTemplate() {
+  return localStorage.getItem(ML_EDIT_URL_STORAGE_KEY) || ML_EDIT_URL_DEFAULT;
+}
+
+function linkMlEdit(itemId) {
+  const template = getUrlMlEditTemplate();
+  const idCodificado = encodeURIComponent(itemId);
+  if (template.includes('{MLA}')) return template.split('{MLA}').join(idCodificado);
+  return template + idCodificado;
+}
+
+function guardarUrlMlEdit() {
+  const valor = document.getElementById('mlEditUrlInput').value.trim();
+  const msg = document.getElementById('mlEditUrlMsg');
+  if (!valor) { msg.textContent = 'No puede estar vacio.'; return; }
+  localStorage.setItem(ML_EDIT_URL_STORAGE_KEY, valor);
+  msg.textContent = 'Guardado.';
+  setTimeout(() => { msg.textContent = ''; }, 2000);
+}
+
+function restaurarUrlMlEdit() {
+  document.getElementById('mlEditUrlInput').value = getUrlMlEditTemplate();
+}
+
+async function cargar() {
+  restaurarBusqueda();
+  restaurarUrlMl();
+  restaurarUrlMlEdit();
+  document.getElementById('tbody').innerHTML = '<tr><td colspan="4">Cargando...</td></tr>';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-list', { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || 'error desconocido');
+    allRows = data.stock;
+    document.getElementById('subInfo').textContent = data.count + ' SKUs';
+    filtrar();
+  } catch (e) {
+    document.getElementById('tbody').innerHTML = '<tr><td colspan="4">Error cargando: ' + e + '</td></tr>';
+  }
+}
+
+function render(rows) {
+  const tbody = document.getElementById('tbody');
+  if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="4">Sin resultados.</td></tr>'; return; }
+  tbody.innerHTML = rows.map(r => `
+    <tr class="${r.stock_actual <= 0 ? 'low' : ''}">
+      <td><div class="skuCell">${r.sku}<a class="mlLink" href="${linkMl(r.sku)}" target="_blank" rel="noopener">ver en ML</a></div></td>
+      <td class="num">${r.stock_actual}</td>
+      <td class="muted">${new Date(r.updated_at).toLocaleString('es-AR')}</td>
+      <td>
+        <div class="pubActions">
+          <button class="expandBtn" onclick="togglePublicaciones('${r.sku}', this)">Publicaciones</button>
+          <button class="expandBtn" onclick="pausarTodo('${r.sku}', this)">Pausar todo</button>
+          <button class="expandBtn" onclick="reactivarTodo('${r.sku}', this)">Reactivar todo</button>
+          <span class="muted" id="contador-${cssSafe(r.sku)}">Activas ${r.publicaciones_activas} de ${r.publicaciones_total}</span>
+        </div>
+      </td>
+    </tr>
+    <tr class="pubRow" id="pubRow-${cssSafe(r.sku)}" style="display:none;">
+      <td colspan="4"><div id="pubContent-${cssSafe(r.sku)}" class="muted">Cargando...</div></td>
+    </tr>`).join('');
+}
+
+function cssSafe(sku) {
+  return sku.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+function actualizarContador(sku, activas, total) {
+  const el = document.getElementById('contador-' + cssSafe(sku));
+  if (el) el.textContent = 'Activas ' + activas + ' de ' + total;
+}
+
+async function pausarTodo(sku, btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '...';
+  let incluirFull = true;
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-publicaciones?sku=' + encodeURIComponent(sku), { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (data.ok) {
+      const hayFull = data.publicaciones.some(p => p.es_full);
+      if (hayFull) {
+        incluirFull = confirm(sku + ' tiene publicaciones en Mercado Full.\n\nAceptar = pausar TODAS (incluyendo Full)\nCancelar = pausar solo las que NO son Full');
+      }
+    }
+  } catch (e) {
+    // si falla el chequeo, seguimos con el comportamiento por defecto (incluir todo)
+  }
+  btn.disabled = false;
+  btn.textContent = original;
+  await cambiarEstadoMasivo(sku, 'paused', btn, incluirFull);
+}
+async function reactivarTodo(sku, btn) { await cambiarEstadoMasivo(sku, 'active', btn, true); }
+
+async function cambiarEstadoMasivo(sku, estado, btn, incluirFull) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-publicaciones-bulk-estado', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sku, estado, incluir_full: incluirFull })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Error: ' + data.error); btn.disabled = false; btn.textContent = original; return; }
+
+    actualizarContador(sku, data.publicaciones_activas_ahora, data.total_publicaciones);
+
+    // Si el panel de publicaciones esta abierto para este sku, lo refresco tambien
+    const row = document.getElementById('pubRow-' + cssSafe(sku));
+    if (row && row.style.display !== 'none') {
+      row.style.display = 'none';
+      await togglePublicaciones(sku, document.querySelector(`button[onclick="togglePublicaciones('${sku}', this)"]`));
+    }
+
+    let msg = `${sku}: ${data.cambiadas} cambiadas`;
+    if (data.excluidas_por_full > 0) msg += `, ${data.excluidas_por_full} Full excluidas`;
+    if (data.errores > 0) { msg += `, ${data.errores} con error.`; alert(msg); }
+  } catch (e) {
+    alert('Error de red: ' + e);
+  }
+  btn.disabled = false;
+  btn.textContent = original;
+}
+
+const ESTADO_TEXTO = {
+  active: 'activa', paused: 'pausada', under_review: 'en revision',
+  closed: 'cerrada', inactive: 'inactiva', payment_required: 'pago pendiente',
+};
+function textoEstado(status) { return ESTADO_TEXTO[status] || status; }
+
+async function togglePublicaciones(sku, btn) {
+  const row = document.getElementById('pubRow-' + cssSafe(sku));
+  const visible = row.style.display !== 'none';
+  if (visible) { row.style.display = 'none'; return; }
+  row.style.display = 'table-row';
+
+  const content = document.getElementById('pubContent-' + cssSafe(sku));
+  content.innerHTML = 'Cargando...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-publicaciones?sku=' + encodeURIComponent(sku), { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (!data.ok) { content.innerHTML = 'Error: ' + data.error; return; }
+    if (data.publicaciones.length === 0) { content.innerHTML = 'Sin publicaciones mapeadas para este SKU.'; return; }
+
+    content.innerHTML = '<table class="pubTable"><thead><tr><th>Estado</th><th>Titulo</th><th>Stock</th><th>Ventas</th><th>Link</th><th>Accion</th></tr></thead><tbody>' + data.publicaciones.map(p => `
+      <tr id="pub-${p.item_id}" data-sku="${sku}">
+        <td><span class="estadoTag ${p.status}">${textoEstado(p.status)}</span>${p.es_full ? '<span class="fullTag">FULL</span>' : ''}${p.status === 'under_review' ? '<span class="fullTag">requiere tu revision en ML</span>' : ''}</td>
+        <td>${p.title || p.item_id}</td>
+        <td class="num">${p.stock_actual_ml === null ? '-' : p.stock_actual_ml}</td>
+        <td class="num">${p.ventas_historicas}</td>
+        <td>
+          <a class="mlLink" href="https://articulo.mercadolibre.com.ar/${p.item_id.replace('MLA','MLA-')}" target="_blank" rel="noopener">${p.item_id}</a>
+          <a class="mlLink" href="${linkMlEdit(p.item_id)}" target="_blank" rel="noopener">editar</a>
+        </td>
+        <td>
+          ${p.status === 'active'
+            ? `<button class="toggleBtn" onclick="cambiarEstado('${p.item_id}','paused', this)">Pausar</button>`
+            : p.status === 'paused'
+              ? `<button class="toggleBtn" onclick="cambiarEstado('${p.item_id}','active', this)">Reactivar</button>`
+              : `<span class="muted">Resolver en ML</span>`}
+        </td>
+      </tr>`).join('') + '</tbody></table>';
+  } catch (e) {
+    content.innerHTML = 'Error de red: ' + e;
+  }
+}
+
+async function cambiarEstado(itemId, nuevoEstado, btn) {
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = '...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-publicacion-estado', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: itemId, estado: nuevoEstado })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Error: ' + data.error); btn.disabled = false; btn.textContent = original; return; }
+
+    const tr = document.getElementById('pub-' + itemId);
+    const sku = tr.getAttribute('data-sku');
+    const tag = tr.querySelector('.estadoTag');
+    tag.className = 'estadoTag ' + nuevoEstado;
+    tag.textContent = nuevoEstado === 'active' ? 'activa' : 'pausada';
+    btn.outerHTML = nuevoEstado === 'active'
+      ? `<button class="toggleBtn" onclick="cambiarEstado('${itemId}','paused', this)">Pausar</button>`
+      : `<button class="toggleBtn" onclick="cambiarEstado('${itemId}','active', this)">Reactivar</button>`;
+
+    const totalFila = document.querySelectorAll(`#pubContent-${cssSafe(sku)} tr`).length;
+    const activasFila = document.querySelectorAll(`#pubContent-${cssSafe(sku)} .estadoTag.active`).length;
+    actualizarContador(sku, activasFila, totalFila);
+  } catch (e) {
+    alert('Error de red: ' + e);
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+function filtrar() {
+  const q = document.getElementById('search').value.trim();
+  localStorage.setItem(SEARCH_STORAGE_KEY, q);
+  if (!q) { render(allRows); return; }
+  render(allRows.filter(r => r.sku.toLowerCase().includes(q.toLowerCase())));
+}
+
+function restaurarBusqueda() {
+  const guardada = localStorage.getItem(SEARCH_STORAGE_KEY);
+  if (guardada) document.getElementById('search').value = guardada;
+}
+
+async function refresh() {
+  const btn = document.getElementById('refreshBtn');
+  const msg = document.getElementById('msg');
+  btn.disabled = true;
+  msg.textContent = 'Consultando ventas nuevas en ML...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-sync-ventas', { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (data.ok) {
+      msg.textContent = 'Ordenes revisadas: ' + data.ordenes_encontradas + ' | Movimientos nuevos: ' + data.movimientos_venta_nuevos + ' | SKUs actualizados en ML: ' + (data.skus_actualizados_en_ml || []).join(', ');
+      await cargar();
+    } else {
+      msg.textContent = 'Error: ' + data.error;
+    }
+  } catch (e) {
+    msg.textContent = 'Error de red: ' + e;
+  }
+  btn.disabled = false;
+}
+
+async function reponer() {
+  const sku = document.getElementById('repoSku').value.trim();
+  const cantidad = parseInt(document.getElementById('repoCantidad').value, 10);
+  const nota = document.getElementById('repoNota').value.trim();
+  const msg = document.getElementById('repoMsg');
+  if (!sku || !cantidad || cantidad <= 0) { msg.textContent = 'Completa SKU y cantidad valida.'; return; }
+  msg.textContent = 'Guardando...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-reposicion', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sku, cantidad, nota })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      msg.textContent = 'Listo. ' + sku + ' ahora tiene ' + data.stock_actual + ' unidades (' + data.publicaciones_actualizadas + ' publicaciones actualizadas en ML).';
+      document.getElementById('repoSku').value = '';
+      document.getElementById('repoCantidad').value = '';
+      document.getElementById('repoNota').value = '';
+      await cargar();
+    } else {
+      msg.textContent = 'Error: ' + data.error;
+    }
+  } catch (e) {
+    msg.textContent = 'Error de red: ' + e;
+  }
+}
+
+function encontrarColumnas(headers) {
+  const norm = headers.map(h => String(h).trim().toLowerCase());
+  let idxSku = norm.findIndex(h => h.includes('sku') || h.includes('codigo') || h.includes('código'));
+  let idxCant = norm.findIndex(h => h.includes('cant') || h.includes('stock') || h.includes('unidad'));
+  let idxEstado = norm.findIndex(h => h.includes('estado'));
+  if (idxSku === -1) idxSku = 0;
+  if (idxCant === -1) idxCant = 1;
+  return { idxSku, idxCant, idxEstado };
+}
+
+async function procesarArchivo() {
+  const fileInput = document.getElementById('fileInput');
+  const msg = document.getElementById('conteoMsg');
+  if (!fileInput.files || fileInput.files.length === 0) { msg.textContent = 'Elegi un archivo primero.'; return; }
+
+  msg.textContent = 'Leyendo archivo...';
+  try {
+    const file = fileInput.files[0];
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    if (rows.length < 2) { msg.textContent = 'El archivo no tiene filas de datos.'; return; }
+
+    const headers = rows[0];
+    const { idxSku, idxCant, idxEstado } = encontrarColumnas(headers);
+
+    const filas = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length === 0) continue;
+      const sku = row[idxSku];
+      if (sku === undefined || sku === null || String(sku).trim() === '') continue;
+
+      const estadoRaw = idxEstado !== -1 ? String(row[idxEstado] ?? '').trim().toLowerCase() : '';
+      if (estadoRaw === 'faltante') {
+        filas.push({ sku: String(sku).trim(), cantidad: null, estado: 'faltante' });
+        continue;
+      }
+
+      const cantidad = row[idxCant];
+      filas.push({ sku: String(sku).trim(), cantidad: (cantidad === undefined || cantidad === '') ? null : Number(cantidad) });
+    }
+
+    if (filas.length === 0) { msg.textContent = 'No se encontraron filas validas (SKU + cantidad).'; return; }
+
+    msg.textContent = 'Procesando ' + filas.length + ' filas contra el sistema...';
+
+    const resp = await fetch(SUPABASE_BASE + '/stock-conteo-preview', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filas })
+    });
+    const data = await resp.json();
+    if (!data.ok) { msg.textContent = 'Error: ' + data.error; return; }
+
+    conteoActual = data;
+    msg.textContent = data.total_contados + ' SKUs contados, ' + data.total_diferencias + ' con diferencia' +
+      (data.no_escaneados && data.no_escaneados.length > 0 ? ', ' + data.no_escaneados.length + ' No escaneados' : '') + '.' +
+      (data.sin_match_en_sistema.length > 0 ? ' SKUs sin match en sistema: ' + data.sin_match_en_sistema.join(', ') : '');
+    renderDiferencias(data);
+  } catch (e) {
+    msg.textContent = 'Error procesando archivo: ' + e;
+  }
+}
+
+function renderDiferencias(data) {
+  const section = document.getElementById('diffSection');
+  const tbody = document.getElementById('diffTbody');
+  const summary = document.getElementById('diffSummary');
+
+  const noEscaneadosHtml = (data.no_escaneados && data.no_escaneados.length > 0)
+    ? `<div class="advItem tipo_sku_nuevo_sin_stock" style="margin-bottom:12px;">
+        <div class="advTitulo">No escaneados (${data.no_escaneados.length})</div>
+        <div class="advDetalle">No se compararon contra el sistema, no afectan el stock. Revisar manualmente: ${data.no_escaneados.join(', ')}</div>
+      </div>`
+    : '';
+
+  if (data.diferencias.length === 0) {
+    section.style.display = 'block';
+    summary.innerHTML = noEscaneadosHtml + 'Sin diferencias numericas. Nada para aplicar.';
+    tbody.innerHTML = '';
+    return;
+  }
+
+  section.style.display = 'block';
+  summary.innerHTML = noEscaneadosHtml + data.total_diferencias + ' diferencias encontradas (conteo ' + String(data.conteo_id).slice(0, 8) + '...)';
+
+  tbody.innerHTML = data.diferencias.map(d => {
+    const cls = d.diferencia < 0 ? 'falta' : 'sobra';
+    return `<tr class="${cls}" data-sku="${d.sku}">
+      <td><input type="checkbox" class="chkDiff" checked></td>
+      <td>${d.sku}</td>
+      <td class="num">${d.stock_sistema}</td>
+      <td class="num">${d.stock_contado}</td>
+      <td class="num diff">${d.diferencia > 0 ? '+' : ''}${d.diferencia}</td>
+    </tr>`;
+  }).join('');
+}
+
+function toggleTodos(marcar) {
+  document.querySelectorAll('.chkDiff').forEach(chk => { chk.checked = marcar; });
+}
+
+async function aplicarSeleccionados() {
+  if (!conteoActual) return;
+  const msg = document.getElementById('conteoMsg');
+  const filas = document.querySelectorAll('#diffTbody tr');
+  const skus = [];
+  filas.forEach(tr => {
+    const chk = tr.querySelector('.chkDiff');
+    if (chk.checked) skus.push(tr.getAttribute('data-sku'));
+  });
+
+  if (skus.length === 0) { msg.textContent = 'No marcaste ningun SKU para aplicar.'; return; }
+
+  const btn = document.getElementById('aplicarBtn');
+  btn.disabled = true;
+  msg.textContent = 'Aplicando ' + skus.length + ' ajustes...';
+
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-conteo-aplicar', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conteo_id: conteoActual.conteo_id, skus_a_aplicar: skus })
+    });
+    const data = await resp.json();
+    if (!data.ok) { msg.textContent = 'Error: ' + data.error; btn.disabled = false; return; }
+
+    msg.textContent = 'Aplicado: ' + data.aplicadas + ' SKUs actualizados (' + data.skus_actualizados.join(', ') + '). Estado del conteo: ' + data.estado_conteo + '.';
+    document.getElementById('conteoEstadoBadge').innerHTML = '<span class="badge ' + data.estado_conteo + '">' + data.estado_conteo + '</span>';
+
+    skus.forEach(sku => {
+      const row = document.querySelector('#diffTbody tr[data-sku="' + sku + '"]');
+      if (row) row.remove();
+    });
+
+    await cargar();
+  } catch (e) {
+    msg.textContent = 'Error de red: ' + e;
+  }
+  btn.disabled = false;
+}
+
+const TIPO_LABELS = {
+  publicacion_sin_sku: 'Publicaciones sin SKU cargado',
+  publicacion_nueva: 'Publicaciones nuevas detectadas',
+  mla_cambio_sku: 'Publicaciones que cambiaron de SKU',
+  sku_nuevo_sin_stock: 'SKUs sin stock inicial',
+  kit_no_reconocido: 'SKUs compuestos no reconocidos como kit',
+  venta_sin_stock_inicial: 'Ventas sobre SKU sin stock (no se empujaron a ML)',
+  publicacion_estado_atipico: 'Publicaciones en revision, cerradas o con problema en ML',
+};
+
+async function cargarAdvertencias() {
+  const content = document.getElementById('advertenciasContent');
+  const countEl = document.getElementById('advertenciasCount');
+  const saludEl = document.getElementById('saludCron');
+  content.innerHTML = 'Cargando...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-advertencias', { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (!data.ok) { content.innerHTML = 'Error: ' + data.error; return; }
+
+    countEl.textContent = data.total;
+    countEl.className = 'badge ' + (data.total === 0 ? 'aplicado' : 'parcial');
+
+    if (Array.isArray(data.salud_cron)) {
+      saludEl.innerHTML = data.salud_cron.map(j => {
+        const fallo = (j.fallas_ultimas_24h || 0) > 0;
+        const ultima = j.ultima_corrida_ok ? new Date(j.ultima_corrida_ok).toLocaleString('es-AR') : 'nunca';
+        return `<span class="${fallo ? 'saludMal' : 'saludOk'}">${fallo ? '\u26A0' : '\u2713'} ${j.jobname}: ultima OK ${ultima}${fallo ? ' | ' + j.fallas_ultimas_24h + ' fallas en 24h' : ''}</span>`;
+      }).join(' &nbsp;|&nbsp; ');
+    }
+
+    if (data.total === 0) {
+      content.innerHTML = '<div class="muted">Sin advertencias abiertas. Todo en orden.</div>';
+      return;
+    }
+
+    const porTipo = {};
+    for (const a of data.advertencias) {
+      if (!porTipo[a.tipo]) porTipo[a.tipo] = [];
+      porTipo[a.tipo].push(a);
+    }
+
+    content.innerHTML = Object.entries(porTipo).map(([tipo, items]) => `
+      <div class="grupoAdv">
+        <div class="grupoAdvTitulo">${TIPO_LABELS[tipo] || tipo} (${items.length})</div>
+        ${items.map(a => `
+          <div class="advItem tipo_${a.tipo}">
+            <div class="advTitulo">${a.sku ? 'SKU: ' + a.sku : ''} ${a.item_id ? (a.sku ? ' — ' : '') + a.item_id : ''}</div>
+            <div class="advDetalle">${escapeHtml(JSON.stringify(a.detalle))}</div>
+            <div class="advDetalle" style="margin-top:4px;">Detectado: ${new Date(a.created_at).toLocaleString('es-AR')}</div>
+            <div class="advAcciones">
+              ${a.item_id ? `<a class="mlLink" href="https://articulo.mercadolibre.com.ar/${a.item_id.replace('MLA','MLA-')}" target="_blank" rel="noopener">ver publicacion</a>` : ''}
+              <button class="resolverBtn" onclick="resolverAdvertencia(${a.id}, this)">Marcar resuelta</button>
+            </div>
+          </div>`).join('')}
+      </div>`).join('');
+  } catch (e) {
+    content.innerHTML = 'Error de red: ' + e;
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+async function resolverAdvertencia(id, btn) {
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-advertencia-resolver', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Error: ' + data.error); btn.disabled = false; btn.textContent = 'Marcar resuelta'; return; }
+    await cargarAdvertencias();
+  } catch (e) {
+    alert('Error de red: ' + e);
+    btn.disabled = false;
+    btn.textContent = 'Marcar resuelta';
+  }
+}
+
+async function cargarFull() {
+  const content = document.getElementById('fullContent');
+  const countEl = document.getElementById('fullCount');
+  content.innerHTML = 'Cargando...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-full', { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (!data.ok) { content.innerHTML = 'Error: ' + data.error; return; }
+
+    countEl.textContent = data.count;
+    countEl.className = 'badge ' + (data.count === 0 ? 'pendiente' : 'aplicado');
+
+    if (data.count === 0) { content.innerHTML = '<div class="muted">No hay publicaciones en Mercado Full.</div>'; return; }
+
+    content.innerHTML = '<table class="pubTable"><thead><tr><th>SKU</th><th>Titulo</th><th>Estado</th><th>Stock (ML)</th><th>Ventas</th><th></th></tr></thead><tbody>' +
+      data.publicaciones.map(p => `
+        <tr class="${(p.stock_actual_ml === 0) ? 'low' : ''}">
+          <td>${p.sku}</td>
+          <td>${p.title || p.item_id}</td>
+          <td><span class="estadoTag ${p.status}">${textoEstado(p.status)}</span></td>
+          <td class="num">${p.stock_actual_ml === null ? '-' : p.stock_actual_ml}</td>
+          <td class="num">${p.ventas_historicas}</td>
+          <td><a class="mlLink" href="https://articulo.mercadolibre.com.ar/${p.item_id.replace('MLA','MLA-')}" target="_blank" rel="noopener">ver</a></td>
+        </tr>`).join('') + '</tbody></table>';
+  } catch (e) {
+    content.innerHTML = 'Error de red: ' + e;
+  }
+}
+
+cargar();
+cargarAdvertencias();
+cargarFull();
+</script>
+</body>
+</html>
