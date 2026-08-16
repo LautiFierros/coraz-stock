@@ -102,6 +102,7 @@
 
   <div class="card">
     <button id="refreshBtn" onclick="refresh()">Refresh manual (chequear ventas nuevas)</button>
+    <div class="muted" id="ultimoSyncVentas" style="margin-top:8px;">Ultima sincronizacion: cargando...</div>
     <div id="msg"></div>
   </div>
 
@@ -536,6 +537,8 @@ async function refresh() {
     const data = await resp.json();
     if (data.ok) {
       msg.textContent = 'Ordenes revisadas: ' + data.ordenes_encontradas + ' | Movimientos nuevos: ' + data.movimientos_venta_nuevos + ' | SKUs actualizados en ML: ' + (data.skus_actualizados_en_ml || []).join(', ');
+      localStorage.setItem(ULTIMO_SYNC_MANUAL_KEY, new Date().toISOString());
+      actualizarUltimoSyncDisplay();
       await cargar();
     } else {
       msg.textContent = 'Error: ' + data.error;
@@ -544,6 +547,25 @@ async function refresh() {
     msg.textContent = 'Error de red: ' + e;
   }
   btn.disabled = false;
+}
+
+const ULTIMO_SYNC_MANUAL_KEY = 'coraz_stock_ultimo_sync_manual';
+let ultimoSyncCron = null;
+
+function actualizarUltimoSyncDisplay() {
+  const el = document.getElementById('ultimoSyncVentas');
+  if (!el) return;
+  const manualStr = localStorage.getItem(ULTIMO_SYNC_MANUAL_KEY);
+  const manual = manualStr ? new Date(manualStr) : null;
+  const cron = ultimoSyncCron ? new Date(ultimoSyncCron) : null;
+
+  let masReciente = null;
+  let origen = '';
+  if (manual && (!cron || manual > cron)) { masReciente = manual; origen = 'manual'; }
+  else if (cron) { masReciente = cron; origen = 'automatico'; }
+
+  if (!masReciente) { el.textContent = 'Ultima sincronizacion: sin datos todavia.'; return; }
+  el.textContent = 'Ultima sincronizacion: ' + masReciente.toLocaleString('es-AR') + ' (' + origen + ')';
 }
 
 async function reponer() {
@@ -748,6 +770,10 @@ async function cargarAdvertencias() {
         const ultima = j.ultima_corrida_ok ? new Date(j.ultima_corrida_ok).toLocaleString('es-AR') : 'nunca';
         return `<span class="${fallo ? 'saludMal' : 'saludOk'}">${fallo ? '\u26A0' : '\u2713'} ${j.jobname}: ultima OK ${ultima}${fallo ? ' | ' + j.fallas_ultimas_24h + ' fallas en 24h' : ''}</span>`;
       }).join(' &nbsp;|&nbsp; ');
+
+      const jobVentas = data.salud_cron.find(j => j.jobname === 'stock-sync-ventas-10min');
+      if (jobVentas && jobVentas.ultima_corrida_ok) ultimoSyncCron = jobVentas.ultima_corrida_ok;
+      actualizarUltimoSyncDisplay();
     }
 
     if (data.total === 0) {
@@ -935,6 +961,7 @@ async function guardarCron(jobname) {
   }
 }
 
+actualizarUltimoSyncDisplay();
 cargar();
 cargarAdvertencias();
 cargarFull();
