@@ -65,6 +65,26 @@
   .grupoAdvTitulo { font-size:13px; color:#e8e8e8; margin-bottom:8px; font-weight:600; }
   .saludOk { color:#5fd97a; }
   .saludMal { color:#ff6b6b; }
+  #funcionamientoCard { font-size:13px; line-height:1.5; }
+  #funcionamientoCard h3 { font-size:14px; margin:16px 0 6px; color:#e8e8e8; }
+  #funcionamientoCard h3:first-of-type { margin-top:6px; }
+  #funcionamientoCard p { margin:4px 0; color:#c5c8ce; }
+  #funcionamientoCard ol, #funcionamientoCard ul { margin:4px 0 4px 18px; padding:0; color:#c5c8ce; }
+  #funcionamientoCard li { margin-bottom:3px; }
+  #funcionamientoCard .fechaUpdate { color:#7a7f87; font-size:11px; margin-top:16px; border-top:1px solid #2a2d34; padding-top:10px; }
+  .ajusteRow { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #22252c; gap:12px; }
+  .ajusteInfo { flex:1; }
+  .ajusteNombre { font-size:13px; font-weight:600; }
+  .ajusteDesc { font-size:11px; color:#7a7f87; margin-top:2px; }
+  .switch { position:relative; width:44px; height:24px; flex-shrink:0; }
+  .switch input { opacity:0; width:0; height:0; }
+  .switchSlider { position:absolute; cursor:pointer; inset:0; background:#2a2d34; border-radius:24px; transition:.2s; }
+  .switchSlider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:#e8e8e8; border-radius:50%; transition:.2s; }
+  input:checked + .switchSlider { background:#4f7cff; }
+  input:checked + .switchSlider:before { transform:translateX(20px); }
+  .cronRow { padding:10px 0; border-bottom:1px solid #22252c; }
+  .cronNombre { font-size:13px; font-weight:600; margin-bottom:6px; }
+  .cronInactivo { color:#ff6b6b; font-size:11px; margin-left:6px; }
 </style>
 </head>
 <body>
@@ -156,6 +176,102 @@
     </div>
     <div class="muted" style="margin-top:6px;">El stock de estas publicaciones lo gestiona ML segun lo que le mandaste al deposito, no lo controla este sistema. Ordenadas de menor a mayor stock.</div>
     <div id="fullContent" style="margin-top:12px;"></div>
+  </div>
+
+  <div class="card" id="configSistemaCard">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2 style="margin:0;">Configuracion del sistema</h2>
+      <button class="secondary" style="width:auto; padding:8px 14px; font-size:13px;" onclick="cargarConfigSistema()">Actualizar</button>
+    </div>
+
+    <h3 style="font-size:14px; margin:16px 0 8px;">Reglas</h3>
+    <div id="ajustesContent" class="muted">Cargando...</div>
+
+    <h3 style="font-size:14px; margin:16px 0 8px;">Frecuencia de sincronizacion (cron)</h3>
+    <div id="cronContent" class="muted">Cargando...</div>
+    <div class="muted" style="margin-top:8px; font-size:11px;">Formato cron: minuto hora dia mes dia-semana. Ej: */10 * * * * = cada 10 min. 0 6 * * * = todos los dias a las 6am.</div>
+  </div>
+
+  <div class="card" id="funcionamientoCard">
+    <h2 style="margin:0 0 4px;">Funcionamiento de la app</h2>
+    <p class="muted">Referencia de las reglas de negocio del sistema. Se actualiza cada vez que cambia algo del comportamiento.</p>
+
+    <h3>Venta de un SKU normal (sin composicion)</h3>
+    <ol>
+      <li>El cron (cada 10 min) o el boton "Refresh manual" detecta la orden nueva en Mercado Libre.</li>
+      <li>Se descuenta la cantidad vendida del stock real de ese SKU.</li>
+      <li>Se empuja el nuevo stock a todas las publicaciones mapeadas a ese SKU (excepto Full).</li>
+    </ol>
+
+    <h3>Venta de un SKU compuesto (paquete o combo, ej. 48x4, 61y27x4)</h3>
+    <ol>
+      <li>NO se descuenta el SKU compuesto en si - no tiene stock propio.</li>
+      <li>Se descuenta el/los componente/s reales segun la composicion (ej. vender un "48x4" descuenta 4 unidades del SKU "48").</li>
+      <li>Se recalculan TODOS los SKUs que dependen de ese componente, no solo el que se vendio (otros paquetes del mismo componente, otros combos que lo usan).</li>
+      <li>Se empuja el nuevo disponible (minimo entre stock del componente y unidades necesarias) a cada uno.</li>
+    </ol>
+    <p><b>Tipos de composicion:</b></p>
+    <ul>
+      <li><b>Paquete simple</b> (BASExN, ej. 35x2, 48x4): N unidades de un solo componente base.</li>
+      <li><b>Combo</b> (A y B, ej. 61y27x4): varios componentes distintos combinados, cada uno con su propia cantidad.</li>
+    </ul>
+
+    <h3>Reactivacion automatica</h3>
+    <ol>
+      <li>Mercado Libre pausa una publicacion solo cuando su stock llega a 0 (comportamiento propio de ML).</li>
+      <li>Mercado Libre NO reactiva solo cuando el stock vuelve a subir - eso lo hace este sistema.</li>
+      <li>Regla: si el stock de un SKU estaba en 0 (o menos) y pasa a positivo por una reposicion, un conteo fisico o una devolucion acreditada, se reactivan automaticamente las publicaciones de ese SKU que estaban pausadas.</li>
+      <li>Una publicacion pausada a proposito (por otro motivo, mientras ya tenia stock) NO se reactiva sola - la condicion es especificamente la transicion de 0 a positivo.</li>
+      <li>Las ventas nunca reactivan (solo bajan stock, nunca lo suben).</li>
+      <li>Esta regla se puede prender/apagar desde "Configuracion del sistema".</li>
+    </ol>
+
+    <h3>Reposicion de stock</h3>
+    <ul>
+      <li>Se puede reponer un SKU real (con stock propio) desde el formulario del dashboard.</li>
+      <li>NO se puede reponer un SKU compuesto directamente (paquete o combo) - el sistema lo bloquea y te dice a que componente/s reponer en su lugar.</li>
+    </ul>
+
+    <h3>Conteo fisico (sabados o cuando corresponda)</h3>
+    <ul>
+      <li>Se sube un Excel/CSV con columnas SKU y Cantidad.</li>
+      <li>Los SKUs compuestos (paquetes y combos) se excluyen automaticamente del reporte de diferencias - nunca se cuentan como pieza fisica propia.</li>
+      <li>Si una fila viene marcada "Faltante" o sin cantidad, se separa como "No escaneado" - no se compara ni se aplica como diferencia real, queda para revision manual.</li>
+      <li>El reporte muestra diferencias con checkboxes; se aplica solo lo que se confirme, seleccion parcial permitida.</li>
+    </ul>
+
+    <h3>Publicaciones Full</h3>
+    <ul>
+      <li>El stock de las publicaciones Full lo gestiona Mercado Libre segun lo que se envio fisicamente al deposito - este sistema nunca intenta modificarlo.</li>
+      <li>El estado (activa/pausada) de una publicacion Full si se puede cambiar manualmente desde el dashboard.</li>
+      <li>Al usar "Pausar todo" sobre un SKU con publicaciones Full, el sistema pregunta si incluirlas o no.</li>
+    </ul>
+
+    <h3>Advertencias (deteccion automatica)</h3>
+    <ul>
+      <li>Publicacion sin SKU cargado en Mercado Libre.</li>
+      <li>Publicacion nueva detectada (primera vez que aparece en el sync).</li>
+      <li>Publicacion que cambio de SKU respecto a lo que se tenia mapeado.</li>
+      <li>SKU con publicaciones mapeadas pero sin ningun stock inicial cargado.</li>
+      <li>SKU con patron de paquete/combo (contiene una "x" o una "y" con numeros) que no esta cargado en la tabla de composicion.</li>
+      <li>Venta detectada sobre un SKU sin stock inicial - no se empuja a ML para evitar pisar con 0, queda registrada para revision.</li>
+      <li>Publicacion que paso a un estado atipico (en revision, cerrada, inactiva, pago pendiente) - Mercado Libre suele pedir una correccion en estos casos.</li>
+    </ul>
+
+    <h3>Frecuencia de sincronizacion</h3>
+    <ul>
+      <li>Ventas: cron automatico cada 10 minutos, o boton "Refresh manual" en cualquier momento.</li>
+      <li>Publicaciones nuevas / cambios de estado en ML: cron automatico diario a las 6am, o se puede correr a mano.</li>
+      <li>Devoluciones: se acreditan recien cuando el envio de vuelta llega a "delivered" (entregado), nunca cuando el cliente solo abre el reclamo.</li>
+    </ul>
+
+    <h3>Configuracion del sistema</h3>
+    <ul>
+      <li>Las reglas de comportamiento (como la reactivacion automatica) se guardan en la base, no en el codigo - se pueden prender/apagar desde el dashboard sin redeployar nada.</li>
+      <li>La frecuencia de los 3 cron jobs (ventas, devoluciones, publicaciones) se puede modificar desde el dashboard, con presets o formato cron personalizado.</li>
+    </ul>
+
+    <div class="fechaUpdate">Ultima actualizacion de esta seccion: 15/08/2026</div>
   </div>
 
 <script>
@@ -716,9 +832,113 @@ async function cargarFull() {
   }
 }
 
+const CRON_LABELS = {
+  'stock-sync-ventas-10min': 'Sincronizar ventas',
+  'stock-sync-devoluciones-10min': 'Sincronizar devoluciones',
+  'stock-sync-ml-items-diario': 'Sincronizar publicaciones (nuevas / cambios de estado)',
+};
+const CRON_PRESETS = ['*/5 * * * *', '*/10 * * * *', '*/15 * * * *', '*/30 * * * *', '0 * * * *', '0 6 * * *', '0 */6 * * *'];
+
+async function cargarConfigSistema() {
+  await Promise.all([cargarAjustes(), cargarCrons()]);
+}
+
+async function cargarAjustes() {
+  const content = document.getElementById('ajustesContent');
+  content.textContent = 'Cargando...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-config', { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (!data.ok) { content.textContent = 'Error: ' + data.error; return; }
+
+    content.innerHTML = data.config.map(c => `
+      <div class="ajusteRow">
+        <div class="ajusteInfo">
+          <div class="ajusteNombre">${c.key.replace(/_/g, ' ')}</div>
+          <div class="ajusteDesc">${c.descripcion || ''}</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" ${c.value === true ? 'checked' : ''} onchange="guardarAjuste('${c.key}', this.checked, this)">
+          <span class="switchSlider"></span>
+        </label>
+      </div>`).join('');
+  } catch (e) {
+    content.textContent = 'Error de red: ' + e;
+  }
+}
+
+async function guardarAjuste(key, valor, input) {
+  input.disabled = true;
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-config', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value: valor })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Error guardando: ' + data.error); input.checked = !valor; }
+  } catch (e) {
+    alert('Error de red: ' + e);
+    input.checked = !valor;
+  }
+  input.disabled = false;
+}
+
+async function cargarCrons() {
+  const content = document.getElementById('cronContent');
+  content.textContent = 'Cargando...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-config-cron', { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (!data.ok) { content.textContent = 'Error: ' + data.error; return; }
+
+    content.innerHTML = data.jobs.map(j => `
+      <div class="cronRow">
+        <div class="cronNombre">${CRON_LABELS[j.jobname] || j.jobname}${!j.active ? '<span class="cronInactivo">inactivo</span>' : ''}</div>
+        <select id="cronSelect-${j.jobname}" onchange="onCronSelectChange('${j.jobname}')">
+          ${CRON_PRESETS.map(p => `<option value="${p}" ${p === j.schedule ? 'selected' : ''}>${p}</option>`).join('')}
+          <option value="__custom__" ${!CRON_PRESETS.includes(j.schedule) ? 'selected' : ''}>Personalizado...</option>
+        </select>
+        <input type="text" id="cronCustom-${j.jobname}" value="${j.schedule}" style="display:${!CRON_PRESETS.includes(j.schedule) ? 'inline-block' : 'none'}; width:140px; margin-left:8px;">
+        <button class="secondary" style="width:auto; padding:6px 12px; font-size:12px; margin-left:8px;" onclick="guardarCron('${j.jobname}')">Guardar</button>
+        <span class="muted" id="cronMsg-${j.jobname}" style="margin-left:8px; font-size:11px;"></span>
+      </div>`).join('');
+  } catch (e) {
+    content.textContent = 'Error de red: ' + e;
+  }
+}
+
+function onCronSelectChange(jobname) {
+  const select = document.getElementById('cronSelect-' + jobname);
+  const custom = document.getElementById('cronCustom-' + jobname);
+  custom.style.display = select.value === '__custom__' ? 'inline-block' : 'none';
+}
+
+async function guardarCron(jobname) {
+  const select = document.getElementById('cronSelect-' + jobname);
+  const custom = document.getElementById('cronCustom-' + jobname);
+  const schedule = select.value === '__custom__' ? custom.value.trim() : select.value;
+  const msg = document.getElementById('cronMsg-' + jobname);
+  msg.textContent = 'Guardando...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-config-cron', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobname, schedule })
+    });
+    const data = await resp.json();
+    if (!data.ok) { msg.textContent = 'Error: ' + data.error; return; }
+    msg.textContent = 'Guardado.';
+    setTimeout(() => { msg.textContent = ''; }, 2000);
+  } catch (e) {
+    msg.textContent = 'Error de red: ' + e;
+  }
+}
+
 cargar();
 cargarAdvertencias();
 cargarFull();
+cargarConfigSistema();
 </script>
 </body>
 </html>
