@@ -536,7 +536,14 @@ async function refresh() {
     const resp = await fetch(SUPABASE_BASE + '/stock-sync-ventas', { headers: { Authorization: AUTH } });
     const data = await resp.json();
     if (data.ok) {
-      msg.textContent = 'Ordenes revisadas: ' + data.ordenes_encontradas + ' | Movimientos nuevos: ' + data.movimientos_venta_nuevos + ' | SKUs actualizados en ML: ' + (data.skus_actualizados_en_ml || []).join(', ');
+      if (data.ventas_detectadas && data.ventas_detectadas.length > 0) {
+        msg.innerHTML = '<b>' + data.ventas_detectadas.length + ' venta(s) detectada(s):</b><br>' +
+          data.ventas_detectadas.map(v =>
+            `SKU ${v.sku}: -${v.unidades_descontadas} unidades (orden ${v.orden}) &rarr; quedaron en <b>${v.stock_resultante === null ? '?' : v.stock_resultante}</b>`
+          ).join('<br>');
+      } else {
+        msg.textContent = 'Ordenes revisadas: ' + data.ordenes_encontradas + '. Sin ventas nuevas desde el ultimo refresh.';
+      }
       localStorage.setItem(ULTIMO_SYNC_MANUAL_KEY, new Date().toISOString());
       actualizarUltimoSyncDisplay();
       await cargar();
