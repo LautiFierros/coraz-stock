@@ -92,6 +92,7 @@
   .actEtiqueta.movimiento { color:#4f7cff; }
   .actEtiqueta.advertencia { color:#e8a94f; }
   .actEtiqueta.devolucion { color:#5fd97a; }
+  .actEtiqueta.estado_publicacion { color:#c586ff; }
   .actDetalle { color:#9aa0a6; margin-top:2px; }
 </style>
 </head>
@@ -293,7 +294,13 @@
       <li>La frecuencia de los 3 cron jobs (ventas, devoluciones, publicaciones) se puede modificar desde el dashboard, con presets o formato cron personalizado.</li>
     </ul>
 
-    <div class="fechaUpdate">Ultima actualizacion de esta seccion: 15/08/2026</div>
+    <h3>Actividad reciente</h3>
+    <ul>
+      <li>Muestra, en una ventana configurable de horas (default 48), todo lo detectado y toda accion tomada: ventas, reposiciones, ajustes, conteos, devoluciones, advertencias y cambios de estado de publicaciones.</li>
+      <li>Los cambios de estado (pausar/reactivar) se registran con el motivo: manual individual, manual masivo (Pausar/Reactivar todo), reactivacion automatica, o deteccion de diferencia con ML.</li>
+    </ul>
+
+    <div class="fechaUpdate">Ultima actualizacion de esta seccion: 17/08/2026</div>
   </div>
 
 <script>
