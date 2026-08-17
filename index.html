@@ -94,11 +94,40 @@
   .actEtiqueta.devolucion { color:#5fd97a; }
   .actEtiqueta.estado_publicacion { color:#c586ff; }
   .actDetalle { color:#9aa0a6; margin-top:2px; }
+
+  .tabBar { display:flex; gap:4px; margin-bottom:20px; border-bottom:1px solid #2a2d34; }
+  .tabBtn { background:transparent; border:none; color:#9aa0a6; border-radius:8px 8px 0 0; padding:10px 18px; font-size:14px; cursor:pointer; width:auto; }
+  .tabBtn.activeTab { background:#1a1d24; color:#e8e8e8; font-weight:600; }
+
+  .mapeosLogin { max-width:340px; margin:40px auto; text-align:center; }
+  .mapeosLogin input { width:100%; box-sizing:border-box; }
+  #mapeosLoginMsg { color:#ff6b6b; font-size:13px; margin-top:8px; min-height:16px; }
+
+  .gridWrap { max-height:65vh; overflow:auto; border:1px solid #2a2d34; border-radius:8px; }
+  table.excelGrid { width:100%; border-collapse:collapse; font-size:13px; }
+  table.excelGrid th { position:sticky; top:0; background:#1e2128; color:#9aa0a6; font-weight:600; text-align:left; padding:8px 10px; border-bottom:1px solid #2a2d34; border-right:1px solid #22252c; white-space:nowrap; }
+  table.excelGrid td { padding:0; border-bottom:1px solid #22252c; border-right:1px solid #22252c; }
+  table.excelGrid td[contenteditable="true"] { padding:7px 10px; cursor:text; }
+  table.excelGrid td[contenteditable="true"]:focus { outline:2px solid #4f7cff; outline-offset:-2px; background:#20242c; }
+  table.excelGrid td.chkCell { padding:7px 10px; text-align:center; }
+  table.excelGrid tr.dirtyRow td { background:#241f14; }
+  table.excelGrid tr.newRow td { background:#14241a; }
+  table.excelGrid tr.deletingRow td { opacity:0.4; text-decoration:line-through; }
+  .gridToolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .gridToolbar .spacer { flex:1; }
+  .pillCount { background:#2a2d34; color:#9aa0a6; border-radius:999px; padding:3px 10px; font-size:12px; }
 </style>
 </head>
 <body>
   <h1>Stock CORAZ - tiempo real</h1>
   <div class="sub" id="subInfo">Cargando...</div>
+
+  <div class="tabBar">
+    <button class="tabBtn" id="tabBtnDashboard" onclick="mostrarTab('dashboard')">Dashboard</button>
+    <button class="tabBtn" id="tabBtnMapeos" onclick="mostrarTab('mapeos')">Mapeos</button>
+  </div>
+
+  <div id="tabDashboard">
 
   <div class="card" id="advertenciasCard">
     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -302,6 +331,63 @@
 
     <div class="fechaUpdate">Ultima actualizacion de esta seccion: 17/08/2026</div>
   </div>
+
+  </div><!-- /tabDashboard -->
+
+  <div id="tabMapeos" style="display:none;">
+
+    <div id="mapeosLoginCard" class="card mapeosLogin">
+      <h2 style="margin:0 0 12px;">Mapeos - acceso restringido</h2>
+      <input id="mapeosUser" placeholder="Usuario" autocomplete="username"><br>
+      <input id="mapeosPass" placeholder="Contrasena" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter') intentarLoginMapeos()"><br>
+      <button onclick="intentarLoginMapeos()" style="width:100%; margin-top:6px;">Ingresar</button>
+      <div id="mapeosLoginMsg"></div>
+    </div>
+
+    <div id="mapeosAppCard" style="display:none;">
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h2 style="margin:0;">Mapeos SKU &harr; Publicacion ML <span id="mapeosCount" class="badge pendiente">...</span></h2>
+          <button class="secondary" style="width:auto; padding:8px 14px; font-size:13px;" onclick="cerrarSesionMapeos()">Cerrar sesion</button>
+        </div>
+        <div class="muted" style="margin-top:6px;">Edicion tipo planilla: hace click en una celda para editarla. Los cambios no se guardan hasta apretar "Guardar cambios".</div>
+
+        <div class="gridToolbar" style="margin-top:16px;">
+          <input id="mapeosSearch" placeholder="Buscar SKU o MLA..." style="margin:0; width:220px;" oninput="renderMapeosGrid()">
+          <button class="secondary" onclick="agregarFilaMapeo()">+ Agregar fila</button>
+          <button onclick="guardarCambiosMapeos()" id="mapeosGuardarBtn">Guardar cambios</button>
+          <button class="danger" onclick="eliminarSeleccionadosMapeos()" id="mapeosEliminarBtn">Eliminar seleccionados</button>
+          <div class="spacer"></div>
+          <span class="pillCount" id="mapeosDirtyPill" style="display:none;"></span>
+          <button class="secondary" onclick="exportarMapeos('xlsx')">Exportar XLSX</button>
+          <button class="secondary" onclick="exportarMapeos('csv')">Exportar CSV</button>
+          <label class="secondary" style="display:inline-flex; align-items:center; padding:10px 16px; border-radius:8px; cursor:pointer;">
+            Importar
+            <input type="file" id="mapeosImportInput" accept=".xlsx,.xls,.csv" style="display:none;" onchange="importarMapeos(this)">
+          </label>
+        </div>
+        <div id="mapeosMsg" class="muted" style="margin-bottom:10px;"></div>
+
+        <div class="gridWrap">
+          <table class="excelGrid">
+            <thead>
+              <tr>
+                <th style="width:30px;"><input type="checkbox" onclick="toggleTodosMapeos(this.checked)"></th>
+                <th>SKU</th>
+                <th>Item ID (MLA)</th>
+                <th>Titulo</th>
+                <th>Estado</th>
+                <th style="width:60px;">Full</th>
+                <th>Sincronizado</th>
+              </tr>
+            </thead>
+            <tbody id="mapeosTbody"><tr><td colspan="7" style="padding:12px;">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /tabMapeos -->
 
 <script>
 const SUPABASE_BASE = 'https://kvewsxrfogosjwehookj.supabase.co/functions/v1';
@@ -1045,6 +1131,290 @@ restaurarActividadHoras();
 cargarActividad();
 
 cargarConfigSistema();
+
+// ===================== SOLAPAS =====================
+const TAB_STORAGE_KEY = 'coraz_stock_tab_activa';
+
+function mostrarTab(nombre) {
+  document.getElementById('tabDashboard').style.display = nombre === 'dashboard' ? '' : 'none';
+  document.getElementById('tabMapeos').style.display = nombre === 'mapeos' ? '' : 'none';
+  document.getElementById('tabBtnDashboard').classList.toggle('activeTab', nombre === 'dashboard');
+  document.getElementById('tabBtnMapeos').classList.toggle('activeTab', nombre === 'mapeos');
+  localStorage.setItem(TAB_STORAGE_KEY, nombre);
+  if (nombre === 'mapeos' && mapeosAuth) cargarMapeos();
+}
+
+(function restaurarTab() {
+  const guardada = localStorage.getItem(TAB_STORAGE_KEY);
+  mostrarTab(guardada === 'mapeos' ? 'mapeos' : 'dashboard');
+})();
+
+// ===================== MAPEOS: login =====================
+let mapeosAuth = null; // se guarda solo en memoria de la pestana, nunca en localStorage
+let mapeosData = [];   // datos originales tal cual vienen del backend
+let mapeosDirty = {};  // item_id_original -> fila editada
+let mapeosNuevas = []; // filas nuevas sin guardar (sin item_id original)
+let mapeosBorrar = new Set();
+
+async function intentarLoginMapeos() {
+  const user = document.getElementById('mapeosUser').value.trim();
+  const pass = document.getElementById('mapeosPass').value;
+  const msg = document.getElementById('mapeosLoginMsg');
+  if (!user || !pass) { msg.textContent = 'Completa usuario y contrasena.'; return; }
+  msg.textContent = 'Verificando...';
+  const auth = 'Basic ' + btoa(user + ':' + pass);
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-mapeos-admin', { headers: { Authorization: auth } });
+    if (resp.status === 401) { msg.textContent = 'Usuario o contrasena incorrectos.'; return; }
+    if (!resp.ok) { msg.textContent = 'Error del servidor (' + resp.status + ').'; return; }
+    mapeosAuth = auth;
+    document.getElementById('mapeosPass').value = '';
+    document.getElementById('mapeosLoginCard').style.display = 'none';
+    document.getElementById('mapeosAppCard').style.display = '';
+    cargarMapeos();
+  } catch (e) {
+    msg.textContent = 'Error de red: ' + e;
+  }
+}
+
+function cerrarSesionMapeos() {
+  mapeosAuth = null;
+  mapeosData = []; mapeosDirty = {}; mapeosNuevas = []; mapeosBorrar = new Set();
+  document.getElementById('mapeosAppCard').style.display = 'none';
+  document.getElementById('mapeosLoginCard').style.display = '';
+  document.getElementById('mapeosUser').value = '';
+}
+
+// ===================== MAPEOS: carga y render =====================
+async function cargarMapeos() {
+  const tbody = document.getElementById('mapeosTbody');
+  tbody.innerHTML = '<tr><td colspan="7" style="padding:12px;">Cargando...</td></tr>';
+  document.getElementById('mapeosMsg').textContent = '';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-mapeos-admin', { headers: { Authorization: mapeosAuth } });
+    const data = await resp.json();
+    if (!data.ok) { tbody.innerHTML = '<tr><td colspan="7" style="padding:12px;">Error: ' + data.error + '</td></tr>'; return; }
+    mapeosData = data.mapeos;
+    mapeosDirty = {}; mapeosNuevas = []; mapeosBorrar = new Set();
+    renderMapeosGrid();
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:12px;">Error de red: ' + e + '</td></tr>';
+  }
+}
+
+function escapeHtmlAttr(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function renderMapeosGrid() {
+  const tbody = document.getElementById('mapeosTbody');
+  const q = (document.getElementById('mapeosSearch').value || '').toLowerCase().trim();
+
+  const filasExistentes = mapeosData.filter(m => {
+    if (!q) return true;
+    return (m.sku || '').toLowerCase().includes(q) || (m.item_id || '').toLowerCase().includes(q);
+  });
+
+  document.getElementById('mapeosCount').textContent = mapeosData.length;
+
+  let html = '';
+  for (const m of filasExistentes) {
+    const key = m.item_id;
+    const editada = mapeosDirty[key];
+    const row = editada || m;
+    const isDirty = !!editada;
+    const isDeleting = mapeosBorrar.has(key);
+    html += `
+      <tr class="${isDirty ? 'dirtyRow' : ''} ${isDeleting ? 'deletingRow' : ''}" data-item-id="${escapeHtmlAttr(key)}">
+        <td class="chkCell"><input type="checkbox" class="mapeoChk" ${isDeleting ? 'checked' : ''} onchange="marcarBorrarMapeo('${escapeHtmlAttr(key)}', this.checked)"></td>
+        <td contenteditable="true" onblur="onEditarCeldaMapeo('${escapeHtmlAttr(key)}', 'sku', this.textContent)">${escapeHtmlAttr(row.sku)}</td>
+        <td class="muted">${escapeHtmlAttr(key)}</td>
+        <td contenteditable="true" onblur="onEditarCeldaMapeo('${escapeHtmlAttr(key)}', 'title', this.textContent)">${escapeHtmlAttr(row.title)}</td>
+        <td contenteditable="true" onblur="onEditarCeldaMapeo('${escapeHtmlAttr(key)}', 'status', this.textContent)">${escapeHtmlAttr(row.status)}</td>
+        <td class="chkCell"><input type="checkbox" ${row.es_full ? 'checked' : ''} onchange="onEditarCeldaMapeo('${escapeHtmlAttr(key)}', 'es_full', this.checked)"></td>
+        <td class="muted">${m.synced_at ? new Date(m.synced_at).toLocaleString('es-AR') : ''}</td>
+      </tr>`;
+  }
+
+  for (let i = 0; i < mapeosNuevas.length; i++) {
+    const n = mapeosNuevas[i];
+    html += `
+      <tr class="newRow" data-nueva-idx="${i}">
+        <td class="chkCell"><input type="checkbox" onchange="quitarFilaNueva(${i})" title="Quitar fila"></td>
+        <td contenteditable="true" onblur="onEditarNueva(${i}, 'sku', this.textContent)">${escapeHtmlAttr(n.sku)}</td>
+        <td contenteditable="true" onblur="onEditarNueva(${i}, 'item_id', this.textContent)">${escapeHtmlAttr(n.item_id)}</td>
+        <td contenteditable="true" onblur="onEditarNueva(${i}, 'title', this.textContent)">${escapeHtmlAttr(n.title)}</td>
+        <td contenteditable="true" onblur="onEditarNueva(${i}, 'status', this.textContent)">${escapeHtmlAttr(n.status)}</td>
+        <td class="chkCell"><input type="checkbox" ${n.es_full ? 'checked' : ''} onchange="onEditarNueva(${i}, 'es_full', this.checked)"></td>
+        <td class="muted">-</td>
+      </tr>`;
+  }
+
+  if (!html) html = '<tr><td colspan="7" style="padding:12px;">Sin resultados.</td></tr>';
+  tbody.innerHTML = html;
+  actualizarPillDirty();
+}
+
+function actualizarPillDirty() {
+  const total = Object.keys(mapeosDirty).length + mapeosNuevas.length + mapeosBorrar.size;
+  const pill = document.getElementById('mapeosDirtyPill');
+  if (total === 0) { pill.style.display = 'none'; return; }
+  pill.style.display = '';
+  pill.textContent = total + ' cambio(s) sin guardar';
+}
+
+function onEditarCeldaMapeo(itemId, campo, valor) {
+  const original = mapeosData.find(m => m.item_id === itemId);
+  if (!original) return;
+  const actual = mapeosDirty[itemId] || { ...original };
+  actual[campo] = campo === 'es_full' ? valor : String(valor).trim();
+  // si termino igual al original en todos los campos relevantes, se borra el dirty
+  const cambio = ['sku', 'title', 'status', 'es_full'].some(c => (actual[c] ?? '') !== (original[c] ?? ''));
+  if (cambio) mapeosDirty[itemId] = actual; else delete mapeosDirty[itemId];
+  actualizarPillDirty();
+  document.querySelector(`tr[data-item-id="${CSS.escape(itemId)}"]`)?.classList.toggle('dirtyRow', !!mapeosDirty[itemId]);
+}
+
+function marcarBorrarMapeo(itemId, checked) {
+  if (checked) mapeosBorrar.add(itemId); else mapeosBorrar.delete(itemId);
+  document.querySelector(`tr[data-item-id="${CSS.escape(itemId)}"]`)?.classList.toggle('deletingRow', checked);
+  actualizarPillDirty();
+}
+
+function toggleTodosMapeos(checked) {
+  document.querySelectorAll('.mapeoChk').forEach(chk => {
+    chk.checked = checked;
+    const tr = chk.closest('tr');
+    const itemId = tr?.getAttribute('data-item-id');
+    if (itemId) marcarBorrarMapeo(itemId, checked);
+  });
+}
+
+function agregarFilaMapeo() {
+  mapeosNuevas.push({ sku: '', item_id: '', title: '', status: '', es_full: false });
+  renderMapeosGrid();
+}
+
+function onEditarNueva(idx, campo, valor) {
+  if (!mapeosNuevas[idx]) return;
+  mapeosNuevas[idx][campo] = campo === 'es_full' ? valor : String(valor).trim();
+  actualizarPillDirty();
+}
+
+function quitarFilaNueva(idx) {
+  mapeosNuevas.splice(idx, 1);
+  renderMapeosGrid();
+}
+
+// ===================== MAPEOS: guardar / eliminar =====================
+async function guardarCambiosMapeos() {
+  const msg = document.getElementById('mapeosMsg');
+  const btn = document.getElementById('mapeosGuardarBtn');
+  const editadas = Object.values(mapeosDirty);
+  const nuevasValidas = mapeosNuevas.filter(n => n.sku && n.item_id);
+  const nuevasInvalidas = mapeosNuevas.length - nuevasValidas.length;
+
+  if (editadas.length === 0 && nuevasValidas.length === 0) { msg.textContent = 'No hay cambios para guardar.'; return; }
+
+  btn.disabled = true;
+  msg.textContent = 'Guardando...';
+  try {
+    for (const fila of editadas) {
+      const resp = await fetch(SUPABASE_BASE + '/stock-mapeos-admin', {
+        method: 'PUT', headers: { Authorization: mapeosAuth, 'Content-Type': 'application/json' },
+        body: JSON.stringify(fila)
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error('Editando ' + fila.item_id + ': ' + data.error);
+    }
+    if (nuevasValidas.length > 0) {
+      const resp = await fetch(SUPABASE_BASE + '/stock-mapeos-admin', {
+        method: 'POST', headers: { Authorization: mapeosAuth, 'Content-Type': 'application/json' },
+        body: JSON.stringify(nuevasValidas)
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error('Creando filas nuevas: ' + data.error);
+    }
+    msg.textContent = 'Guardado. ' + (nuevasInvalidas > 0 ? nuevasInvalidas + ' fila(s) nueva(s) se ignoraron por falta de SKU o MLA.' : '');
+    await cargarMapeos();
+  } catch (e) {
+    msg.textContent = 'Error: ' + e.message;
+  }
+  btn.disabled = false;
+}
+
+async function eliminarSeleccionadosMapeos() {
+  if (mapeosBorrar.size === 0) { document.getElementById('mapeosMsg').textContent = 'No hay filas seleccionadas para eliminar.'; return; }
+  if (!confirm('Vas a eliminar ' + mapeosBorrar.size + ' mapeo(s). Esta accion no se puede deshacer. Continuar?')) return;
+
+  const btn = document.getElementById('mapeosEliminarBtn');
+  const msg = document.getElementById('mapeosMsg');
+  btn.disabled = true;
+  msg.textContent = 'Eliminando...';
+  try {
+    const resp = await fetch(SUPABASE_BASE + '/stock-mapeos-admin', {
+      method: 'DELETE', headers: { Authorization: mapeosAuth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_ids: Array.from(mapeosBorrar) })
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error);
+    msg.textContent = data.eliminados + ' mapeo(s) eliminado(s).';
+    await cargarMapeos();
+  } catch (e) {
+    msg.textContent = 'Error: ' + e.message;
+  }
+  btn.disabled = false;
+}
+
+// ===================== MAPEOS: exportar / importar =====================
+function filasParaExportar() {
+  return mapeosData.map(m => ({
+    sku: m.sku, item_id: m.item_id, title: m.title || '', status: m.status || '', es_full: m.es_full ? 'true' : 'false'
+  }));
+}
+
+function exportarMapeos(formato) {
+  const filas = filasParaExportar();
+  const ws = XLSX.utils.json_to_sheet(filas, { header: ['sku', 'item_id', 'title', 'status', 'es_full'] });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Mapeos');
+  const nombre = 'coraz_mapeos_' + new Date().toISOString().slice(0, 10) + (formato === 'csv' ? '.csv' : '.xlsx');
+  if (formato === 'csv') XLSX.writeFile(wb, nombre, { bookType: 'csv' });
+  else XLSX.writeFile(wb, nombre, { bookType: 'xlsx' });
+}
+
+function importarMapeos(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const msg = document.getElementById('mapeosMsg');
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'binary' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const filas = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      let cargadas = 0;
+      for (const f of filas) {
+        const sku = String(f.sku ?? f.SKU ?? '').trim();
+        const item_id = String(f.item_id ?? f.mla ?? f.MLA ?? f['Item ID'] ?? '').trim();
+        if (!sku || !item_id) continue;
+        mapeosNuevas.push({
+          sku, item_id,
+          title: String(f.title ?? f.titulo ?? f.Titulo ?? '').trim(),
+          status: String(f.status ?? f.estado ?? '').trim(),
+          es_full: ['true', '1', 'si', 'sí'].includes(String(f.es_full ?? '').toLowerCase().trim()),
+        });
+        cargadas++;
+      }
+      renderMapeosGrid();
+      msg.textContent = cargadas + ' fila(s) cargadas desde el archivo (agregadas como filas nuevas). Revisa y apreta "Guardar cambios" para confirmar.';
+    } catch (err) {
+      msg.textContent = 'Error leyendo el archivo: ' + err;
+    }
+    input.value = '';
+  };
+  reader.readAsBinaryString(file);
+}
 </script>
 </body>
 </html>
