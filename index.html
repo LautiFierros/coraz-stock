@@ -460,9 +460,11 @@ async function togglePublicaciones(sku, btn) {
     if (!data.ok) { content.innerHTML = 'Error: ' + data.error; return; }
     if (data.publicaciones.length === 0) { content.innerHTML = 'Sin publicaciones mapeadas para este SKU.'; return; }
 
-    content.innerHTML = '<table class="pubTable"><thead><tr><th>Estado</th><th>Titulo</th><th>Stock</th><th>Ventas</th><th>Link</th><th>Accion</th></tr></thead><tbody>' + data.publicaciones.map(p => `
+    content.innerHTML = '<table class="pubTable"><thead><tr><th>Estado</th><th>Titulo</th><th>Stock</th><th>Ventas</th><th>Link</th><th>Accion</th></tr></thead><tbody>' + data.publicaciones.map(p => {
+      const estadoReal = p.status_en_vivo || p.status;
+      return `
       <tr id="pub-${p.item_id}" data-sku="${sku}">
-        <td><span class="estadoTag ${p.status}">${textoEstado(p.status)}</span>${p.es_full ? '<span class="fullTag">FULL</span>' : ''}${p.status === 'under_review' ? '<span class="fullTag">requiere tu revision en ML</span>' : ''}</td>
+        <td><span class="estadoTag ${estadoReal}">${textoEstado(estadoReal)}</span>${p.es_full ? '<span class="fullTag">FULL</span>' : ''}${estadoReal === 'under_review' ? '<span class="fullTag">requiere tu revision en ML</span>' : ''}${p.status_desactualizado ? '<span class="fullTag">cache corregido</span>' : ''}</td>
         <td>${p.title || p.item_id}</td>
         <td class="num">${p.stock_actual_ml === null ? '-' : p.stock_actual_ml}</td>
         <td class="num">${p.ventas_historicas}</td>
@@ -471,13 +473,14 @@ async function togglePublicaciones(sku, btn) {
           <a class="mlLink" href="${linkMlEdit(p.item_id)}" target="_blank" rel="noopener">editar</a>
         </td>
         <td>
-          ${p.status === 'active'
+          ${estadoReal === 'active'
             ? `<button class="toggleBtn" onclick="cambiarEstado('${p.item_id}','paused', this)">Pausar</button>`
-            : p.status === 'paused'
+            : estadoReal === 'paused'
               ? `<button class="toggleBtn" onclick="cambiarEstado('${p.item_id}','active', this)">Reactivar</button>`
               : `<span class="muted">Resolver en ML</span>`}
         </td>
-      </tr>`).join('') + '</tbody></table>';
+      </tr>`;
+    }).join('') + '</tbody></table>';
   } catch (e) {
     content.innerHTML = 'Error de red: ' + e;
   }
