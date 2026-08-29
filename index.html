@@ -188,8 +188,26 @@
   </div>
 
   <div class="card">
-    <h2>Conteo fisico semanal (sabados)</h2>
-    <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <h2 id="conteoTituloFrecuencia" style="margin:0;">Conteo fisico...</h2>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <select id="conteoFrecuenciaSelect" onchange="guardarFrecuenciaConteo()">
+          <option value="semanal">Semanal</option>
+          <option value="quincenal">Quincenal</option>
+          <option value="mensual">Mensual</option>
+        </select>
+        <select id="conteoDiaSelect" onchange="guardarFrecuenciaConteo()">
+          <option value="lunes">Lunes</option>
+          <option value="martes">Martes</option>
+          <option value="miercoles">Miercoles</option>
+          <option value="jueves">Jueves</option>
+          <option value="viernes">Viernes</option>
+          <option value="sabado">Sabado</option>
+          <option value="domingo">Domingo</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin:10px 0;">
       <select id="conteosPendientesSelect" style="flex:1;"><option value="">Cargando conteos pendientes...</option></select>
       <button class="secondary" onclick="cargarConteoPendiente()">Reabrir</button>
       <button class="secondary" onclick="refrescarConteosPendientes()">&#8635;</button>
@@ -199,11 +217,6 @@
       <button onclick="procesarArchivo()">Generar reporte de diferencias</button>
     </div>
     <div class="muted" style="margin-top:8px;">El archivo debe tener columnas <b>SKU</b> y <b>Cantidad</b> (nombres de columna flexibles, primeras dos columnas se usan si no matchea por nombre).</div>
-    <div class="fileRow" style="margin-top:8px;">
-      <label for="horaConteo" class="muted" style="white-space:nowrap;">Hora de respaldo:</label>
-      <input type="datetime-local" id="horaConteo">
-    </div>
-    <div class="muted" style="margin-top:4px;">Si el archivo trae columna de fecha por fila (export de coraz-scanner), se usa esa hora por SKU y esto queda como respaldo. Si no trae fecha, completá esto con la hora real en que arrancaste a contar.</div>
     <div id="conteoMsg"></div>
 
     <div id="diffSection" style="display:none; margin-top:16px;">
@@ -955,6 +968,42 @@ function recuperarFilasMalFormadas(rows) {
   return filasRecuperadas;
 }
 
+const DIA_LABEL = { lunes: 'lunes', martes: 'martes', miercoles: 'miercoles', jueves: 'jueves', viernes: 'viernes', sabado: 'sabados', domingo: 'domingos' };
+
+async function cargarFrecuenciaConteo() {
+  try {
+    const resp = await fetchStock(SUPABASE_BASE + '/stock-config', { headers: { Authorization: AUTH } });
+    const data = await resp.json();
+    if (!data.ok) return;
+    const row = data.config.find(c => c.key === 'conteo_fisico_frecuencia');
+    const valor = row ? row.value : { frecuencia: 'semanal', dia: 'sabado' };
+    document.getElementById('conteoFrecuenciaSelect').value = valor.frecuencia || 'semanal';
+    document.getElementById('conteoDiaSelect').value = valor.dia || 'sabado';
+    actualizarTituloFrecuencia(valor);
+  } catch (e) {
+    // si falla, se queda con los defaults del select; no es bloqueante
+  }
+}
+
+function actualizarTituloFrecuencia(valor) {
+  const frecuenciaTxt = valor.frecuencia.charAt(0).toUpperCase() + valor.frecuencia.slice(1);
+  document.getElementById('conteoTituloFrecuencia').textContent = 'Conteo fisico ' + valor.frecuencia + ' (' + (DIA_LABEL[valor.dia] || valor.dia) + ')';
+}
+
+async function guardarFrecuenciaConteo() {
+  const valor = { frecuencia: document.getElementById('conteoFrecuenciaSelect').value, dia: document.getElementById('conteoDiaSelect').value };
+  actualizarTituloFrecuencia(valor);
+  try {
+    await fetchStock(SUPABASE_BASE + '/stock-config', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'conteo_fisico_frecuencia', value: valor })
+    });
+  } catch (e) {
+    showToast('No se pudo guardar la frecuencia: ' + e, 'bad');
+  }
+}
+
 async function refrescarConteosPendientes() {
   const select = document.getElementById('conteosPendientesSelect');
   select.innerHTML = '<option value="">Cargando...</option>';
@@ -1054,15 +1103,12 @@ async function procesarArchivo() {
 
     msg.textContent = (recuperado ? '[Archivo recuperado: estaba mal exportado, columnas re-separadas automaticamente] ' : '') +
       'Procesando ' + filas.length + ' filas contra el sistema' +
-      (idxFecha !== -1 ? ' (' + conFechaPropia + ' con hora de escaneo propia, resto usa la hora de respaldo)' : ' (el archivo no trae columna de fecha, se usa la hora de respaldo para todo)') + '...';
-
-    const horaInput = document.getElementById('horaConteo').value;
-    const momentoConteo = horaInput ? new Date(horaInput).toISOString() : new Date().toISOString();
+      (idxFecha !== -1 ? ' (' + conFechaPropia + ' con hora de escaneo propia, resto usa la hora actual)' : ' (el archivo no trae columna de fecha, se usa la hora actual para todo)') + '...';
 
     const resp = await fetchStock(SUPABASE_BASE + '/stock-conteo-preview', {
       method: 'POST',
       headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filas, momento_conteo: momentoConteo })
+      body: JSON.stringify({ filas })
     });
     const data = await resp.json();
     if (!data.ok) { msg.textContent = 'Error: ' + data.error; return; }
@@ -1745,6 +1791,7 @@ function iniciarApp() {
   cargarAdvertencias();
   cargarFull();
   refrescarConteosPendientes();
+  cargarFrecuenciaConteo();
   mostrarTab(localStorage.getItem(TAB_STORAGE_KEY) === 'mapeos' ? 'mapeos' : 'dashboard');
 }
 
