@@ -1602,9 +1602,10 @@ function exportarDiferencias() {
     .sort((a, b) => a.sku.localeCompare(b.sku)) // orden alfabetico por SKU para recorrer la gondola
     .map(d => ({ sku: d.sku, titulo: d.titulo || '', sistema: d.stock_sistema, contado: d.stock_contado, diferencia: d.diferencia, reconteo: '', ok: '' }));
   const ws = XLSX.utils.json_to_sheet(filas, { header: ['sku', 'titulo', 'sistema', 'contado', 'diferencia', 'reconteo', 'ok'] });
+  ws['!cols'] = [{ wch: 16 }, { wch: 42 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 6 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Diferencias');
-  XLSX.writeFile(wb, 'coraz_reconteo_' + String(conteoActual.conteo_id).slice(0, 8) + '_' + new Date().toISOString().slice(0, 10) + '.csv', { bookType: 'csv' });
+  XLSX.writeFile(wb, 'coraz_reconteo_' + String(conteoActual.conteo_id).slice(0, 8) + '_' + new Date().toISOString().slice(0, 10) + '.xlsx', { bookType: 'xlsx' });
 }
 
 function exportarMapeos(formato) {
