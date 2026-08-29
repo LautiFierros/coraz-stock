@@ -189,6 +189,11 @@
 
   <div class="card">
     <h2>Conteo fisico semanal (sabados)</h2>
+    <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+      <select id="conteosPendientesSelect" style="flex:1;"><option value="">Cargando conteos pendientes...</option></select>
+      <button class="secondary" onclick="cargarConteoPendiente()">Reabrir</button>
+      <button class="secondary" onclick="refrescarConteosPendientes()">&#8635;</button>
+    </div>
     <div class="fileRow">
       <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
       <button onclick="procesarArchivo()">Generar reporte de diferencias</button>
@@ -950,6 +955,49 @@ function recuperarFilasMalFormadas(rows) {
   return filasRecuperadas;
 }
 
+async function refrescarConteosPendientes() {
+  const select = document.getElementById('conteosPendientesSelect');
+  select.innerHTML = '<option value="">Cargando...</option>';
+  try {
+    const resp = await fetchStock(SUPABASE_BASE + '/stock-conteo-pendientes', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+    });
+    const data = await resp.json();
+    if (!data.ok) { select.innerHTML = '<option value="">Error cargando pendientes</option>'; return; }
+    if (data.pendientes.length === 0) { select.innerHTML = '<option value="">Sin conteos pendientes</option>'; return; }
+    select.innerHTML = data.pendientes.map(p =>
+      `<option value="${p.id}">${p.fecha} — ${p.estado} — ${p.total_diferencias} diferencias (${String(p.id).slice(0,8)}...)</option>`
+    ).join('');
+  } catch (e) {
+    select.innerHTML = '<option value="">Error: ' + e + '</option>';
+  }
+}
+
+async function cargarConteoPendiente() {
+  const select = document.getElementById('conteosPendientesSelect');
+  const conteoId = select.value;
+  const msg = document.getElementById('conteoMsg');
+  if (!conteoId) { msg.textContent = 'Elegi un conteo pendiente de la lista.'; return; }
+
+  msg.textContent = 'Cargando conteo ' + conteoId.slice(0, 8) + '...';
+  try {
+    const resp = await fetchStock(SUPABASE_BASE + '/stock-conteo-detalle', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conteo_id: conteoId })
+    });
+    const data = await resp.json();
+    if (!data.ok) { msg.textContent = 'Error: ' + data.error; return; }
+
+    conteoActual = data;
+    msg.textContent = 'Conteo reabierto: ' + data.total_diferencias + ' diferencias pendientes de aplicar.';
+    renderDiferencias(data);
+  } catch (e) {
+    msg.textContent = 'Error cargando conteo: ' + e;
+  }
+}
+
 async function procesarArchivo() {
   const fileInput = document.getElementById('fileInput');
   const msg = document.getElementById('conteoMsg');
@@ -1107,6 +1155,7 @@ async function aplicarSeleccionados() {
     });
 
     await cargar();
+    await refrescarConteosPendientes();
   } catch (e) {
     msg.textContent = 'Error de red: ' + e;
   }
@@ -1668,6 +1717,7 @@ function iniciarApp() {
   cargar();
   cargarAdvertencias();
   cargarFull();
+  refrescarConteosPendientes();
   mostrarTab(localStorage.getItem(TAB_STORAGE_KEY) === 'mapeos' ? 'mapeos' : 'dashboard');
 }
 
