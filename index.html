@@ -1102,15 +1102,28 @@ function renderDiferencias(data) {
   tbody.innerHTML = data.diferencias.map(d => {
     const cls = d.diferencia < 0 ? 'falta' : 'sobra';
     const tituloTxt = d.titulo ? escapeHtml(d.titulo) : '<span style="color:#999">sin publicacion ni combo</span>';
-    return `<tr class="${cls}" data-sku="${d.sku}">
+    return `<tr class="${cls}" data-sku="${d.sku}" data-sistema="${d.stock_sistema}">
       <td><input type="checkbox" class="chkDiff" checked></td>
       <td>${d.sku}</td>
       <td style="max-width:280px;font-size:0.85em;">${tituloTxt}</td>
       <td class="num">${d.stock_sistema}</td>
-      <td class="num">${d.stock_contado}</td>
-      <td class="num diff">${d.diferencia > 0 ? '+' : ''}${d.diferencia}</td>
+      <td class="num"><input type="number" class="inputContado" value="${d.stock_contado}" style="width:70px; text-align:right;" oninput="recalcularDiferenciaFila(this)"></td>
+      <td class="num diff" id="diffCell-${d.sku}">${d.diferencia > 0 ? '+' : ''}${d.diferencia}</td>
     </tr>`;
   }).join('');
+}
+
+function recalcularDiferenciaFila(input) {
+  const tr = input.closest('tr');
+  const sistema = Number(tr.getAttribute('data-sistema'));
+  const contado = Number(input.value);
+  const cell = tr.querySelector('[id^="diffCell-"]');
+  if (!Number.isFinite(contado)) { cell.textContent = '?'; return; }
+  const diferencia = contado - sistema;
+  cell.textContent = (diferencia > 0 ? '+' : '') + diferencia;
+  tr.classList.remove('falta', 'sobra');
+  tr.classList.add(diferencia < 0 ? 'falta' : 'sobra');
+  input.style.fontWeight = (contado !== Number(input.defaultValue)) ? 'bold' : 'normal';
 }
 
 function toggleTodos(marcar) {
@@ -1122,9 +1135,16 @@ async function aplicarSeleccionados() {
   const msg = document.getElementById('conteoMsg');
   const filas = document.querySelectorAll('#diffTbody tr');
   const skus = [];
+  const correcciones = {};
   filas.forEach(tr => {
     const chk = tr.querySelector('.chkDiff');
-    if (chk.checked) skus.push(tr.getAttribute('data-sku'));
+    const sku = tr.getAttribute('data-sku');
+    const input = tr.querySelector('.inputContado');
+    if (input) {
+      const valor = Number(input.value);
+      if (Number.isFinite(valor)) correcciones[sku] = Math.round(valor);
+    }
+    if (chk.checked) skus.push(sku);
   });
 
   if (skus.length === 0) { msg.textContent = 'No marcaste ningun SKU para aplicar.'; return; }
@@ -1137,15 +1157,22 @@ async function aplicarSeleccionados() {
     const resp = await fetchStock(SUPABASE_BASE + '/stock-conteo-aplicar', {
       method: 'POST',
       headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conteo_id: conteoActual.conteo_id, skus_a_aplicar: skus })
+      body: JSON.stringify({ conteo_id: conteoActual.conteo_id, skus_a_aplicar: skus, correcciones })
     });
     const data = await resp.json();
     if (!data.ok) { msg.textContent = 'Error: ' + data.error; btn.disabled = false; return; }
 
     msg.textContent = 'Aplicado: ' + data.aplicadas + ' SKUs actualizados (' + data.skus_actualizados.join(', ') + '). Estado del conteo: ' + data.estado_conteo + '.';
     if (data.recalculos && data.recalculos.length > 0) {
-      msg.textContent += ' \u26A0 ' + data.recalculos.length + ' diferencias se recalcularon por ventas sincronizadas despues del preview: ' +
-        data.recalculos.map(r => r.sku + ' (' + r.diferencia_anterior + '\u2192' + r.diferencia_nueva + ')').join(', ') + '.';
+      const manuales = data.recalculos.filter(r => r.motivo === 'correccion_manual');
+      const tardias = data.recalculos.filter(r => r.motivo !== 'correccion_manual');
+      if (manuales.length > 0) {
+        msg.textContent += ' Corregidas a mano: ' + manuales.map(r => r.sku + ' (' + r.diferencia_anterior + '\u2192' + r.diferencia_nueva + ')').join(', ') + '.';
+      }
+      if (tardias.length > 0) {
+        msg.textContent += ' \u26A0 ' + tardias.length + ' diferencias se recalcularon por ventas sincronizadas despues del preview: ' +
+          tardias.map(r => r.sku + ' (' + r.diferencia_anterior + '\u2192' + r.diferencia_nueva + ')').join(', ') + '.';
+      }
     }
     document.getElementById('conteoEstadoBadge').innerHTML = '<span class="badge ' + data.estado_conteo + '">' + data.estado_conteo + '</span>';
 
