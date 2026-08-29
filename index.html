@@ -194,6 +194,11 @@
       <button onclick="procesarArchivo()">Generar reporte de diferencias</button>
     </div>
     <div class="muted" style="margin-top:8px;">El archivo debe tener columnas <b>SKU</b> y <b>Cantidad</b> (nombres de columna flexibles, primeras dos columnas se usan si no matchea por nombre).</div>
+    <div class="fileRow" style="margin-top:8px;">
+      <label for="horaConteo" class="muted" style="white-space:nowrap;">Hora real del conteo:</label>
+      <input type="datetime-local" id="horaConteo">
+    </div>
+    <div class="muted" style="margin-top:4px;">Dejalo con la hora en que arrancaste a contar, no cuando subis el archivo. Asi una venta sincronizada despues del conteo (pero antes de subir el archivo) no se cuenta como diferencia falsa.</div>
     <div id="conteoMsg"></div>
 
     <div id="diffSection" style="display:none; margin-top:16px;">
@@ -202,6 +207,7 @@
         <div>
           <button class="secondary" onclick="toggleTodos(true)">Marcar todos</button>
           <button class="secondary" onclick="toggleTodos(false)">Desmarcar todos</button>
+          <button class="secondary" onclick="exportarDiferencias()">Exportar para reconteo</button>
         </div>
       </div>
       <div id="diffWrap">
@@ -995,10 +1001,13 @@ async function procesarArchivo() {
     msg.textContent = (recuperado ? '[Archivo recuperado: estaba mal exportado, columnas re-separadas automaticamente] ' : '') +
       'Procesando ' + filas.length + ' filas contra el sistema...';
 
+    const horaInput = document.getElementById('horaConteo').value;
+    const momentoConteo = horaInput ? new Date(horaInput).toISOString() : new Date().toISOString();
+
     const resp = await fetchStock(SUPABASE_BASE + '/stock-conteo-preview', {
       method: 'POST',
       headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filas })
+      body: JSON.stringify({ filas, momento_conteo: momentoConteo })
     });
     const data = await resp.json();
     if (!data.ok) { msg.textContent = 'Error: ' + data.error; return; }
@@ -1079,6 +1088,10 @@ async function aplicarSeleccionados() {
     if (!data.ok) { msg.textContent = 'Error: ' + data.error; btn.disabled = false; return; }
 
     msg.textContent = 'Aplicado: ' + data.aplicadas + ' SKUs actualizados (' + data.skus_actualizados.join(', ') + '). Estado del conteo: ' + data.estado_conteo + '.';
+    if (data.recalculos && data.recalculos.length > 0) {
+      msg.textContent += ' \u26A0 ' + data.recalculos.length + ' diferencias se recalcularon por ventas sincronizadas despues del preview: ' +
+        data.recalculos.map(r => r.sku + ' (' + r.diferencia_anterior + '\u2192' + r.diferencia_nueva + ')').join(', ') + '.';
+    }
     document.getElementById('conteoEstadoBadge').innerHTML = '<span class="badge ' + data.estado_conteo + '">' + data.estado_conteo + '</span>';
 
     skus.forEach(sku => {
@@ -1581,6 +1594,17 @@ function filasParaExportar() {
   return mapeosData.map(m => ({
     sku: m.sku, item_id: m.item_id, title: m.title || '', status: m.status || '', es_full: m.es_full ? 'true' : 'false'
   }));
+}
+
+function exportarDiferencias() {
+  if (!conteoActual || !conteoActual.diferencias || conteoActual.diferencias.length === 0) return;
+  const filas = [...conteoActual.diferencias]
+    .sort((a, b) => a.sku.localeCompare(b.sku)) // orden alfabetico por SKU para recorrer la gondola
+    .map(d => ({ sku: d.sku, titulo: d.titulo || '', sistema: d.stock_sistema, contado: d.stock_contado, diferencia: d.diferencia, reconteo: '', ok: '' }));
+  const ws = XLSX.utils.json_to_sheet(filas, { header: ['sku', 'titulo', 'sistema', 'contado', 'diferencia', 'reconteo', 'ok'] });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Diferencias');
+  XLSX.writeFile(wb, 'coraz_reconteo_' + String(conteoActual.conteo_id).slice(0, 8) + '_' + new Date().toISOString().slice(0, 10) + '.csv', { bookType: 'csv' });
 }
 
 function exportarMapeos(formato) {
