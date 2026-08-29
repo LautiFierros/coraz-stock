@@ -195,10 +195,10 @@
     </div>
     <div class="muted" style="margin-top:8px;">El archivo debe tener columnas <b>SKU</b> y <b>Cantidad</b> (nombres de columna flexibles, primeras dos columnas se usan si no matchea por nombre).</div>
     <div class="fileRow" style="margin-top:8px;">
-      <label for="horaConteo" class="muted" style="white-space:nowrap;">Hora real del conteo:</label>
+      <label for="horaConteo" class="muted" style="white-space:nowrap;">Hora de respaldo:</label>
       <input type="datetime-local" id="horaConteo">
     </div>
-    <div class="muted" style="margin-top:4px;">Dejalo con la hora en que arrancaste a contar, no cuando subis el archivo. Asi una venta sincronizada despues del conteo (pero antes de subir el archivo) no se cuenta como diferencia falsa.</div>
+    <div class="muted" style="margin-top:4px;">Si el archivo trae columna de fecha por fila (export de coraz-scanner), se usa esa hora por SKU y esto queda como respaldo. Si no trae fecha, completá esto con la hora real en que arrancaste a contar.</div>
     <div id="conteoMsg"></div>
 
     <div id="diffSection" style="display:none; margin-top:16px;">
@@ -902,9 +902,10 @@ function encontrarColumnas(headers) {
   let idxSku = norm.findIndex(h => h.includes('sku') || h.includes('codigo') || h.includes('código'));
   let idxCant = norm.findIndex(h => h.includes('cant') || h.includes('stock') || h.includes('unidad'));
   let idxEstado = norm.findIndex(h => h.includes('estado'));
+  let idxFecha = norm.findIndex(h => h.includes('fecha') || h.includes('timestamp') || h.includes('momento'));
   if (idxSku === -1) idxSku = 0;
   if (idxCant === -1) idxCant = 1;
-  return { idxSku, idxCant, idxEstado };
+  return { idxSku, idxCant, idxEstado, idxFecha };
 }
 
 // Parser CSV minimo (soporta comillas y comas dentro de campos entrecomillados)
@@ -969,7 +970,7 @@ async function procesarArchivo() {
     if (filasRecuperadas) { rows = filasRecuperadas; recuperado = true; }
 
     const headers = rows[0];
-    const { idxSku, idxCant, idxEstado } = encontrarColumnas(headers);
+    const { idxSku, idxCant, idxEstado, idxFecha } = encontrarColumnas(headers);
 
     // Si sku y cantidad terminan apuntando a la misma columna, el archivo esta
     // mal formado y no se puede separar con confianza: cortar en vez de mandar
@@ -980,26 +981,32 @@ async function procesarArchivo() {
     }
 
     const filas = [];
+    let conFechaPropia = 0;
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       if (!row || row.length === 0) continue;
       const sku = row[idxSku];
       if (sku === undefined || sku === null || String(sku).trim() === '') continue;
 
+      const momentoRaw = idxFecha !== -1 ? row[idxFecha] : null;
+      const momento = (momentoRaw !== undefined && momentoRaw !== null && String(momentoRaw).trim() !== '') ? String(momentoRaw).trim() : null;
+      if (momento) conFechaPropia++;
+
       const estadoRaw = idxEstado !== -1 ? String(row[idxEstado] ?? '').trim().toLowerCase() : '';
       if (estadoRaw === 'faltante') {
-        filas.push({ sku: String(sku).trim(), cantidad: null, estado: 'faltante' });
+        filas.push({ sku: String(sku).trim(), cantidad: null, estado: 'faltante', momento });
         continue;
       }
 
       const cantidad = row[idxCant];
-      filas.push({ sku: String(sku).trim(), cantidad: (cantidad === undefined || cantidad === '') ? null : Number(cantidad) });
+      filas.push({ sku: String(sku).trim(), cantidad: (cantidad === undefined || cantidad === '') ? null : Number(cantidad), momento });
     }
 
     if (filas.length === 0) { msg.textContent = 'No se encontraron filas validas (SKU + cantidad).'; return; }
 
     msg.textContent = (recuperado ? '[Archivo recuperado: estaba mal exportado, columnas re-separadas automaticamente] ' : '') +
-      'Procesando ' + filas.length + ' filas contra el sistema...';
+      'Procesando ' + filas.length + ' filas contra el sistema' +
+      (idxFecha !== -1 ? ' (' + conFechaPropia + ' con hora de escaneo propia, resto usa la hora de respaldo)' : ' (el archivo no trae columna de fecha, se usa la hora de respaldo para todo)') + '...';
 
     const horaInput = document.getElementById('horaConteo').value;
     const momentoConteo = horaInput ? new Date(horaInput).toISOString() : new Date().toISOString();
