@@ -354,6 +354,64 @@
       <li>NO se puede reponer un SKU compuesto directamente (paquete o combo) - el sistema lo bloquea y te dice a que componente/s reponer en su lugar.</li>
     </ul>
 
+    <h3>Procedimiento: como hacer el conteo fisico, paso a paso</h3>
+    <p class="muted">Pensado para que cualquiera pueda operar el conteo sin que se lo expliquen antes.</p>
+
+    <p><b>1) Antes de arrancar</b></p>
+    <ol>
+      <li>Abri <b>coraz-scanner</b> desde el celular.</li>
+      <li>Si es un conteo nuevo, arranca un inventario con un nombre que se entienda (ej. la fecha). Si es continuacion de uno que se corto, abri ese mismo inventario para seguir sumando ahi.</li>
+    </ol>
+
+    <p><b>2) Durante el conteo, recorriendo la gondola</b></p>
+    <ol>
+      <li>Escanea el codigo de barras de cada producto (o tipealo si no lee bien).</li>
+      <li>Cargá la cantidad contada.</li>
+      <li>Si un producto no se puede contar o no se encuentra, marcalo <b>"Faltante"</b> en vez de inventar un numero - queda separado para revisar a mano despues, no ensucia el reporte de diferencias.</li>
+      <li>Guardá y segui con el siguiente. Cada guardado queda con su hora exacta - esa hora es la que despues compara contra el sistema, asi que no hace falta apurarse ni preocuparse por cuanto tarda el conteo completo.</li>
+      <li>Se puede cortar y retomar mas tarde: lo contado queda guardado en el celular hasta que se exporte.</li>
+    </ol>
+
+    <p><b>3) Al terminar de contar</b></p>
+    <ol>
+      <li>Toca <b>"Exportar XLSX"</b> (no el de CSV - el XLSX abre siempre bien las columnas y los acentos; el CSV puede salir todo pegado en una sola columna segun como este configurado el Excel de la compu).</li>
+      <li>Se descarga un archivo <code>coraz-stock-[inventario]-[fecha].xlsx</code>. Pasalo a la computadora o celular donde se vaya a subir a coraz-stock.</li>
+    </ol>
+
+    <p><b>4) Subir el archivo y revisar las diferencias</b></p>
+    <ol>
+      <li>Entra a <b>coraz-stock</b>, arriba de todo esta la seccion "Conteo fisico...".</li>
+      <li>Antes de subir nada, mira el desplegable <b>"Conteos pendientes"</b> - si ya hay uno cargado de esta misma sesion de conteo, apreta <b>"Reabrir"</b> en vez de subir el archivo de nuevo (subir dos veces el mismo conteo genera un duplicado inutil).</li>
+      <li>Elegi el archivo XLSX y toca <b>"Generar reporte de diferencias"</b>.</li>
+      <li>El sistema compara cada SKU contra el stock que tenia el sistema justo en el momento en que se escaneo ese SKU puntual (no el momento en que se sube el archivo) - por eso importa la hora de cada escaneo, no hay que ajustar nada a mano.</li>
+      <li>La tabla muestra <b>Sistema</b> (lo que dice el sistema), <b>Contado</b> (lo que se escaneo) y <b>Diferencia</b> (Contado menos Sistema). Diferencia positiva = sobra stock, negativa = falta.</li>
+    </ol>
+
+    <p><b>5) Diferencia grande o rara: doble chequeo antes de aplicar</b></p>
+    <ol>
+      <li>Si una diferencia llama la atencion (un numero grande, un producto que nunca se mueve, etc.), no se aplica a ciegas.</li>
+      <li>Toca <b>"Exportar para reconteo"</b>: baja un Excel con esas diferencias y dos columnas extra, "reconteo" y "ok", para anotar a mano.</li>
+      <li>Anda a la gondola con ese archivo (impreso o en el celular) y volve a contar solo esos SKUs puntuales.</li>
+      <li>Si el reconteo coincide con lo contado la primera vez, la diferencia era real - se aplica tal cual viene.</li>
+      <li>Si el reconteo da otro numero, corregilo directamente en el campo <b>"Contado"</b> de la tabla en pantalla (es editable, se puede tipear encima) antes de aplicar - la Diferencia se recalcula sola al lado.</li>
+      <li>Si un tercer conteo tampoco cierra con los anteriores, no se aplica ese SKU - avisar para revisar a mano (puede ser un codigo de barras confundido con otro producto, un SKU mal mapeado, o una reposicion grande que no se cargo en el sistema).</li>
+    </ol>
+
+    <p><b>6) Aplicar</b></p>
+    <ol>
+      <li>Tildá los SKUs que se quieren aplicar (vienen todos tildados por defecto) y toca <b>"Aplicar seleccionados"</b>.</li>
+      <li>Esto genera el ajuste de stock y empuja el numero nuevo a Mercado Libre para las publicaciones de esos SKUs.</li>
+      <li>El sistema vuelve a chequear contra el historial justo antes de aplicar: si en el medio se sincronizo una venta, o si ese mismo conteo ya se habia aplicado antes por error, lo detecta y ajusta solo, sin duplicar nada.</li>
+      <li>Se puede aplicar de a partes (tildar solo algunos) y volver mas tarde a terminar el resto - el conteo queda en estado "parcial" hasta que se aplique todo, y sigue disponible en "Conteos pendientes".</li>
+    </ol>
+
+    <p><b>Errores comunes</b></p>
+    <ul>
+      <li><i>"El archivo no tiene columnas separadas de SKU y cantidad"</i>: el Excel salio mal exportado. Volver a exportar desde coraz-scanner en XLSX.</li>
+      <li>SKUs listados como <i>"sin match en sistema"</i>: son codigos que nunca tuvieron un movimiento de stock cargado - revisar si estan bien escritos o si son productos nuevos sin dar de alta.</li>
+      <li>Si se cierra el navegador con un conteo generado pero sin aplicar, no se pierde: buscarlo en "Conteos pendientes" la proxima vez.</li>
+    </ul>
+
     <h3>Conteo fisico (sabados o cuando corresponda)</h3>
     <ul>
       <li>Se sube un Excel/CSV con columnas SKU y Cantidad.</li>
