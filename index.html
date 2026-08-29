@@ -163,16 +163,19 @@
   <div class="sub" id="subInfo">Cargando...</div>
 
   <div class="tabBar">
-    <button class="tabBtn" id="tabBtnDashboard" onclick="mostrarTab('dashboard')">Dashboard</button>
+    <button class="tabBtn" id="tabBtnStock" onclick="mostrarTab('stock')">Stock</button>
+    <button class="tabBtn" id="tabBtnConteo" onclick="mostrarTab('conteo')">Conteo</button>
+    <button class="tabBtn" id="tabBtnMonitoreo" onclick="mostrarTab('monitoreo')">Monitoreo</button>
+    <button class="tabBtn" id="tabBtnSistema" onclick="mostrarTab('sistema')">Sistema</button>
     <button class="tabBtn" id="tabBtnMapeos" onclick="mostrarTab('mapeos')">Mapeos</button>
     <div style="flex:1;"></div>
     <span id="authUserLabel" class="muted" style="align-self:center; font-size:12px;"></span>
     <button class="secondary" style="width:auto; padding:6px 12px; font-size:12px; align-self:center; margin-bottom:4px;" onclick="cerrarSesion()">Salir</button>
   </div>
 
-  <div id="tabDashboard">
 
-  <div class="card" id="advertenciasCard">
+
+  <div class="card" id="advertenciasCard" data-tab="monitoreo">
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <h2 style="margin:0;">Advertencias <span id="advertenciasCount" class="badge pendiente">...</span></h2>
       <button class="secondary" style="width:auto; padding:8px 14px; font-size:13px;" onclick="cargarAdvertencias()">Actualizar</button>
@@ -181,13 +184,13 @@
     <div id="advertenciasContent" style="margin-top:12px;"></div>
   </div>
 
-  <div class="card">
+  <div class="card" data-tab="stock">
     <button id="refreshBtn" onclick="refresh()">Refresh manual (chequear ventas nuevas)</button>
     <div class="muted" id="ultimoSyncVentas" style="margin-top:8px;">Ultima sincronizacion: cargando...</div>
     <div id="msg"></div>
   </div>
 
-  <div class="card">
+  <div class="card" data-tab="conteo">
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
       <h2 id="conteoTituloFrecuencia" style="margin:0;">Conteo fisico...</h2>
       <div style="display:flex; gap:6px; align-items:center;">
@@ -241,7 +244,7 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" data-tab="stock">
     <b>Cargar reposicion</b>
     <div class="muted" style="margin-top:6px; margin-bottom:10px;">Carga uno o varios SKU de una misma compra. La nota se aplica a todos.</div>
     <div id="repoFilas"></div>
@@ -255,7 +258,7 @@
     <div id="repoMsg"></div>
   </div>
 
-  <div class="card">
+  <div class="card" data-tab="stock">
     <b>Configuracion</b>
     <div class="muted" style="margin-top:6px; margin-bottom:10px;">URL de busqueda en Mercado Libre. Usa <code>{SKU}</code> donde deba ir el codigo. Si ML cambia el formato, editala aca sin tocar el archivo.</div>
     <input id="mlUrlInput" style="width:100%; box-sizing:border-box;">
@@ -268,7 +271,7 @@
     <span class="muted" id="mlEditUrlMsg" style="margin-left:8px;"></span>
   </div>
 
-  <div class="card">
+  <div class="card" data-tab="stock">
     <input id="search" placeholder="Buscar SKU..." oninput="filtrar()">
     <div id="tableWrap">
     <table>
@@ -278,7 +281,7 @@
     </div>
   </div>
 
-  <div class="card" id="fullCard">
+  <div class="card" id="fullCard" data-tab="stock">
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <h2 style="margin:0;">Stock en Full <span id="fullCount" class="badge pendiente">...</span></h2>
       <button class="secondary" style="width:auto; padding:8px 14px; font-size:13px;" onclick="cargarFull()">Actualizar</button>
@@ -287,7 +290,7 @@
     <div id="fullContent" style="margin-top:12px;"></div>
   </div>
 
-  <div class="card" id="actividadCard">
+  <div class="card" id="actividadCard" data-tab="monitoreo">
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
       <h2 style="margin:0;">Actividad reciente</h2>
       <div style="display:flex; align-items:center; gap:6px;">
@@ -300,7 +303,7 @@
     <div id="actividadContent" style="margin-top:12px; max-height:400px; overflow-y:auto;"></div>
   </div>
 
-  <div class="card" id="configSistemaCard">
+  <div class="card" id="configSistemaCard" data-tab="sistema">
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <h2 style="margin:0;">Configuracion del sistema</h2>
       <button class="secondary" style="width:auto; padding:8px 14px; font-size:13px;" onclick="cargarConfigSistema()">Actualizar</button>
@@ -314,7 +317,7 @@
     <div class="muted" style="margin-top:8px; font-size:11px;">Formato cron: minuto hora dia mes dia-semana. Ej: */10 * * * * = cada 10 min. 0 6 * * * = todos los dias a las 6am.</div>
   </div>
 
-  <div class="card" id="funcionamientoCard">
+  <div class="card" id="funcionamientoCard" data-tab="sistema">
     <h2 style="margin:0 0 4px;">Funcionamiento de la app</h2>
     <p class="muted">Referencia de las reglas de negocio del sistema. Se actualiza cada vez que cambia algo del comportamiento.</p>
 
@@ -460,7 +463,7 @@
     <div class="fechaUpdate">Ultima actualizacion de esta seccion: 17/08/2026</div>
   </div>
 
-  </div><!-- /tabDashboard -->
+
 
   <div id="tabMapeos" style="display:none;">
 
@@ -1564,12 +1567,18 @@ function restaurarActividadHoras() {
 // Supabase Auth respondiera 200 OK.
 let mapeosAuth = null; // token de sesion (se setea en onAuthStateChange)
 const TAB_STORAGE_KEY = 'coraz_stock_tab_activa';
+const TABS = ['stock', 'conteo', 'monitoreo', 'sistema', 'mapeos'];
 
 function mostrarTab(nombre) {
-  document.getElementById('tabDashboard').style.display = nombre === 'dashboard' ? '' : 'none';
+  if (!TABS.includes(nombre)) nombre = 'stock';
+  document.querySelectorAll('[data-tab]').forEach(el => {
+    el.style.display = (el.getAttribute('data-tab') === nombre) ? '' : 'none';
+  });
   document.getElementById('tabMapeos').style.display = nombre === 'mapeos' ? '' : 'none';
-  document.getElementById('tabBtnDashboard').classList.toggle('activeTab', nombre === 'dashboard');
-  document.getElementById('tabBtnMapeos').classList.toggle('activeTab', nombre === 'mapeos');
+  TABS.forEach(t => {
+    const btn = document.getElementById('tabBtn' + t.charAt(0).toUpperCase() + t.slice(1));
+    if (btn) btn.classList.toggle('activeTab', t === nombre);
+  });
   localStorage.setItem(TAB_STORAGE_KEY, nombre);
   if (nombre === 'mapeos') {
     document.getElementById('mapeosAppCard').style.display = '';
@@ -1579,7 +1588,7 @@ function mostrarTab(nombre) {
 
 (function restaurarTab() {
   const guardada = localStorage.getItem(TAB_STORAGE_KEY);
-  mostrarTab(guardada === 'mapeos' ? 'mapeos' : 'dashboard');
+  mostrarTab(TABS.includes(guardada) ? guardada : 'stock');
 })();
 
 // ===================== MAPEOS: estado =====================
@@ -1850,7 +1859,7 @@ function iniciarApp() {
   cargarFull();
   refrescarConteosPendientes();
   cargarFrecuenciaConteo();
-  mostrarTab(localStorage.getItem(TAB_STORAGE_KEY) === 'mapeos' ? 'mapeos' : 'dashboard');
+  mostrarTab(TABS.includes(localStorage.getItem(TAB_STORAGE_KEY)) ? localStorage.getItem(TAB_STORAGE_KEY) : 'stock');
 }
 
 let appIniciada = false;
