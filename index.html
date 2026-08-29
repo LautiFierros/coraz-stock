@@ -1162,7 +1162,7 @@ async function aplicarSeleccionados() {
     const data = await resp.json();
     if (!data.ok) { msg.textContent = 'Error: ' + data.error; btn.disabled = false; return; }
 
-    msg.textContent = 'Aplicado: ' + data.aplicadas + ' SKUs actualizados (' + data.skus_actualizados.join(', ') + '). Estado del conteo: ' + data.estado_conteo + '.';
+    msg.textContent = 'Aplicado: ' + data.aplicadas + ' SKUs actualizados (' + (data.skus_actualizados || []).join(', ') + '). Estado del conteo: ' + data.estado_conteo + '.';
     if (data.recalculos && data.recalculos.length > 0) {
       const manuales = data.recalculos.filter(r => r.motivo === 'correccion_manual');
       const tardias = data.recalculos.filter(r => r.motivo !== 'correccion_manual');
