@@ -44,6 +44,7 @@
   .badge.aplicado { background:rgba(124,162,92,0.16); color:var(--green); }
   .badge.parcial { background:rgba(232,137,12,0.16); color:var(--amber); }
   .badge.pendiente { background:var(--card2); color:var(--muted); }
+  .badge.nuevo { background:var(--amber); color:#1a1409; font-weight:700; }
   .mlLink { color:var(--amber); text-decoration:none; font-size:12px; margin-left:8px; white-space:nowrap; }
   .mlLink:hover { text-decoration:underline; }
   .skuCell { display:flex; align-items:center; }
@@ -164,7 +165,7 @@
 
   <div class="tabBar">
     <button class="tabBtn" id="tabBtnStock" onclick="mostrarTab('stock')">Stock</button>
-    <button class="tabBtn" id="tabBtnConteo" onclick="mostrarTab('conteo')">Conteo</button>
+    <button class="tabBtn" id="tabBtnConteo" onclick="mostrarTab('conteo')">Conteo<span id="conteoNuevoBadge" class="badge nuevo" style="display:none;"></span></button>
     <button class="tabBtn" id="tabBtnMonitoreo" onclick="mostrarTab('monitoreo')">Monitoreo</button>
     <button class="tabBtn" id="tabBtnSistema" onclick="mostrarTab('sistema')">Sistema</button>
     <button class="tabBtn" id="tabBtnMapeos" onclick="mostrarTab('mapeos')">Mapeos</button>
@@ -238,7 +239,7 @@
         </table>
       </div>
       <div style="margin-top:12px;">
-        <button onclick="aplicarSeleccionados()" id="aplicarBtn">Aplicar seleccionados</button>
+        <button onclick="aplicarSeleccionados()" id="aplicarBtn">Aplicar inventario</button>
         <span class="muted" id="conteoEstadoBadge"></span>
       </div>
     </div>
@@ -1065,6 +1066,31 @@ async function guardarFrecuenciaConteo() {
   }
 }
 
+const CONTEOS_VISTOS_KEY = 'coraz_stock_conteos_vistos';
+let ultimosPendientes = [];
+
+function getConteosVistos() {
+  try { return new Set(JSON.parse(localStorage.getItem(CONTEOS_VISTOS_KEY) || '[]')); }
+  catch (e) { return new Set(); }
+}
+function marcarConteosVistos(ids) {
+  const vistos = getConteosVistos();
+  ids.forEach(id => vistos.add(id));
+  localStorage.setItem(CONTEOS_VISTOS_KEY, JSON.stringify([...vistos]));
+  actualizarBadgeConteo();
+}
+function actualizarBadgeConteo() {
+  const vistos = getConteosVistos();
+  const nuevos = ultimosPendientes.filter(p => !vistos.has(p.id));
+  const badge = document.getElementById('conteoNuevoBadge');
+  if (nuevos.length > 0) {
+    badge.textContent = nuevos.length + ' nuevo' + (nuevos.length === 1 ? '' : 's');
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
 async function refrescarConteosPendientes() {
   const select = document.getElementById('conteosPendientesSelect');
   select.innerHTML = '<option value="">Cargando...</option>';
@@ -1075,9 +1101,16 @@ async function refrescarConteosPendientes() {
     });
     const data = await resp.json();
     if (!data.ok) { select.innerHTML = '<option value="">Error cargando pendientes</option>'; return; }
+    ultimosPendientes = data.pendientes;
+    actualizarBadgeConteo();
+    const tabBtn = document.getElementById('tabBtnConteo');
+    if (tabBtn && tabBtn.classList.contains('activeTab')) {
+      marcarConteosVistos(ultimosPendientes.map(p => p.id));
+    }
     if (data.pendientes.length === 0) { select.innerHTML = '<option value="">Sin conteos pendientes</option>'; return; }
+    const vistos = getConteosVistos();
     select.innerHTML = data.pendientes.map(p =>
-      `<option value="${p.id}">${p.fecha} — ${p.estado} — ${p.total_diferencias} diferencias (${String(p.id).slice(0,8)}...)</option>`
+      `<option value="${p.id}">${vistos.has(p.id) ? '' : '🆕 '}${p.fecha} — ${p.estado} — ${p.total_diferencias} diferencias (${String(p.id).slice(0,8)}...)</option>`
     ).join('');
   } catch (e) {
     select.innerHTML = '<option value="">Error: ' + e + '</option>';
@@ -1580,6 +1613,9 @@ function mostrarTab(nombre) {
     if (btn) btn.classList.toggle('activeTab', t === nombre);
   });
   localStorage.setItem(TAB_STORAGE_KEY, nombre);
+  if (nombre === 'conteo') {
+    marcarConteosVistos(ultimosPendientes.map(p => p.id));
+  }
   if (nombre === 'mapeos') {
     document.getElementById('mapeosAppCard').style.display = '';
     if (mapeosAuth) cargarMapeos();
@@ -1860,6 +1896,7 @@ function iniciarApp() {
   refrescarConteosPendientes();
   cargarFrecuenciaConteo();
   mostrarTab(TABS.includes(localStorage.getItem(TAB_STORAGE_KEY)) ? localStorage.getItem(TAB_STORAGE_KEY) : 'stock');
+  setInterval(() => { if (AUTH) refrescarConteosPendientes(); }, 90000);
 }
 
 let appIniciada = false;
