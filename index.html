@@ -44,7 +44,6 @@
   .badge.aplicado { background:rgba(124,162,92,0.16); color:var(--green); }
   .badge.parcial { background:rgba(232,137,12,0.16); color:var(--amber); }
   .badge.pendiente { background:var(--card2); color:var(--muted); }
-  .badge.nuevo { background:var(--amber); color:#1a1409; font-weight:700; }
   .mlLink { color:var(--amber); text-decoration:none; font-size:12px; margin-left:8px; white-space:nowrap; }
   .mlLink:hover { text-decoration:underline; }
   .skuCell { display:flex; align-items:center; }
@@ -165,7 +164,7 @@
 
   <div class="tabBar">
     <button class="tabBtn" id="tabBtnStock" onclick="mostrarTab('stock')">Stock</button>
-    <button class="tabBtn" id="tabBtnConteo" onclick="mostrarTab('conteo')">Conteo<span id="conteoNuevoBadge" class="badge nuevo" style="display:none;"></span></button>
+    <button class="tabBtn" id="tabBtnConteo" onclick="mostrarTab('conteo')">Conteo</button>
     <button class="tabBtn" id="tabBtnMonitoreo" onclick="mostrarTab('monitoreo')">Monitoreo</button>
     <button class="tabBtn" id="tabBtnSistema" onclick="mostrarTab('sistema')">Sistema</button>
     <button class="tabBtn" id="tabBtnMapeos" onclick="mostrarTab('mapeos')">Mapeos</button>
@@ -239,22 +238,28 @@
         </table>
       </div>
       <div style="margin-top:12px;">
-        <button onclick="aplicarSeleccionados()" id="aplicarBtn">Aplicar inventario</button>
+        <button onclick="aplicarSeleccionados()" id="aplicarBtn">Aplicar seleccionados</button>
         <span class="muted" id="conteoEstadoBadge"></span>
       </div>
     </div>
   </div>
 
   <div class="card" data-tab="stock">
-    <b>Cargar reposicion</b>
-    <div class="muted" style="margin-top:6px; margin-bottom:10px;">Carga uno o varios SKU de una misma compra. La nota se aplica a todos.</div>
+    <b>Cargar reposicion / envio a Full</b>
+    <div class="muted" style="margin-top:6px; margin-bottom:10px;" id="repoDesc">Carga uno o varios SKU de una misma compra. La nota se aplica a todos.</div>
+    <div style="margin-bottom:12px;">
+      <select id="repoModo" onchange="actualizarModoRepo()" style="width:auto;">
+        <option value="reposicion">Reposicion (sumar stock de gondola)</option>
+        <option value="envio_full">Envio a Full (restar stock de gondola)</option>
+      </select>
+    </div>
     <div id="repoFilas"></div>
     <button class="secondary" type="button" style="width:auto; padding:8px 14px; font-size:13px;" onclick="agregarFilaRepo()">+ Agregar fila</button>
     <div style="margin-top:12px;">
-      <input id="repoNota" placeholder="Nota comun (opcional, ej. Compra 20/08 proveedor X)" style="width:100%; box-sizing:border-box;">
+      <input id="repoNota" placeholder="Nota comun (opcional, ej. Compra 20/08 proveedor X / Remito Full 03/09)" style="width:100%; box-sizing:border-box;">
     </div>
     <div style="margin-top:12px;">
-      <button onclick="reponer()">Sumar stock</button>
+      <button id="repoBtn" onclick="reponer()">Sumar stock</button>
     </div>
     <div id="repoMsg"></div>
   </div>
@@ -928,8 +933,22 @@ function quitarFilaRepo(id) {
   if (document.querySelectorAll('#repoFilas .repoFila').length === 0) agregarFilaRepo();
 }
 
+function actualizarModoRepo() {
+  const modo = document.getElementById('repoModo').value;
+  const desc = document.getElementById('repoDesc');
+  const btn = document.getElementById('repoBtn');
+  if (modo === 'envio_full') {
+    desc.textContent = 'Carga uno o varios SKU que se van a mandar fisicamente a Full. Se descuenta del stock de gondola. La nota se aplica a todos.';
+    btn.textContent = 'Descontar stock (enviar a Full)';
+  } else {
+    desc.textContent = 'Carga uno o varios SKU de una misma compra. La nota se aplica a todos.';
+    btn.textContent = 'Sumar stock';
+  }
+}
+
 async function reponer() {
   const msg = document.getElementById('repoMsg');
+  const modo = document.getElementById('repoModo').value;
   const nota = document.getElementById('repoNota').value.trim();
   const filas = [...document.querySelectorAll('#repoFilas .repoFila')];
 
@@ -947,20 +966,23 @@ async function reponer() {
   }
   if (items.length === 0) { msg.textContent = 'Agrega al menos una fila con SKU y cantidad.'; return; }
 
-  const btn = document.querySelector('#repoMsg') ? document.querySelector('button[onclick="reponer()"]') : null;
+  const btn = document.getElementById('repoBtn');
   if (btn) btn.disabled = true;
-  msg.textContent = 'Guardando ' + items.length + ' articulo(s)...';
+  msg.textContent = (modo === 'envio_full' ? 'Descontando ' : 'Guardando ') + items.length + ' articulo(s)...';
   try {
     const resp = await fetchStock(SUPABASE_BASE + '/stock-reposicion-bulk', {
       method: 'POST',
       headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, nota })
+      body: JSON.stringify({ items, nota, modo })
     });
     const data = await resp.json();
     if (data.ok) {
-      msg.innerHTML = '<b>Listo, ' + data.total_items + ' articulo(s) cargados:</b><br>' +
-        data.resultados.map(r => `${r.sku}: +${r.cargado} &rarr; queda en <b>${r.stock_actual}</b>`).join('<br>') +
-        (data.kits_refrescados && data.kits_refrescados.length ? '<br><span class="muted">Kits recalculados: ' + data.kits_refrescados.join(', ') + '</span>' : '');
+      const signo = data.modo === 'envio_full' ? '-' : '+';
+      const titulo = data.modo === 'envio_full' ? 'Listo, envio a Full registrado' : 'Listo, reposicion cargada';
+      msg.innerHTML = `<b>${titulo} (${data.total_items} articulo(s)):</b><br>` +
+        data.resultados.map(r => `${r.sku}: ${signo}${r.cargado} &rarr; queda en <b>${r.stock_actual}</b>`).join('<br>') +
+        (data.kits_refrescados && data.kits_refrescados.length ? '<br><span class="muted">Kits recalculados: ' + data.kits_refrescados.join(', ') + '</span>' : '') +
+        (data.advertencias_full && data.advertencias_full.length ? '<br><span class="muted">⚠ Sin publicaciones Full mapeadas: ' + data.advertencias_full.join(', ') + '</span>' : '');
       document.getElementById('repoFilas').innerHTML = '';
       agregarFilaRepo();
       document.getElementById('repoNota').value = '';
@@ -969,6 +991,7 @@ async function reponer() {
       let extra = '';
       if (Array.isArray(data.errores)) extra = ' | ' + data.errores.map(e => `fila ${e.fila} (${e.sku || 'sin sku'}): ${e.error}`).join('; ');
       if (Array.isArray(data.kits_invalidos)) extra = ' | ' + data.kits_invalidos.map(k => `${k.sku} => repone ${k.componentes.join(', ')}`).join(' | ');
+      if (Array.isArray(data.insuficientes)) extra = ' | ' + data.insuficientes.map(i => `${i.sku}: pedis ${i.solicitado}, hay ${i.disponible}`).join(' | ');
       msg.textContent = 'Error: ' + data.error + extra;
     }
   } catch (e) {
@@ -1066,31 +1089,6 @@ async function guardarFrecuenciaConteo() {
   }
 }
 
-const CONTEOS_VISTOS_KEY = 'coraz_stock_conteos_vistos';
-let ultimosPendientes = [];
-
-function getConteosVistos() {
-  try { return new Set(JSON.parse(localStorage.getItem(CONTEOS_VISTOS_KEY) || '[]')); }
-  catch (e) { return new Set(); }
-}
-function marcarConteosVistos(ids) {
-  const vistos = getConteosVistos();
-  ids.forEach(id => vistos.add(id));
-  localStorage.setItem(CONTEOS_VISTOS_KEY, JSON.stringify([...vistos]));
-  actualizarBadgeConteo();
-}
-function actualizarBadgeConteo() {
-  const vistos = getConteosVistos();
-  const nuevos = ultimosPendientes.filter(p => !vistos.has(p.id));
-  const badge = document.getElementById('conteoNuevoBadge');
-  if (nuevos.length > 0) {
-    badge.textContent = nuevos.length + ' nuevo' + (nuevos.length === 1 ? '' : 's');
-    badge.style.display = '';
-  } else {
-    badge.style.display = 'none';
-  }
-}
-
 async function refrescarConteosPendientes() {
   const select = document.getElementById('conteosPendientesSelect');
   select.innerHTML = '<option value="">Cargando...</option>';
@@ -1101,16 +1099,9 @@ async function refrescarConteosPendientes() {
     });
     const data = await resp.json();
     if (!data.ok) { select.innerHTML = '<option value="">Error cargando pendientes</option>'; return; }
-    ultimosPendientes = data.pendientes;
-    actualizarBadgeConteo();
-    const tabBtn = document.getElementById('tabBtnConteo');
-    if (tabBtn && tabBtn.classList.contains('activeTab')) {
-      marcarConteosVistos(ultimosPendientes.map(p => p.id));
-    }
     if (data.pendientes.length === 0) { select.innerHTML = '<option value="">Sin conteos pendientes</option>'; return; }
-    const vistos = getConteosVistos();
     select.innerHTML = data.pendientes.map(p =>
-      `<option value="${p.id}">${vistos.has(p.id) ? '' : '🆕 '}${p.fecha} — ${p.estado} — ${p.total_diferencias} diferencias (${String(p.id).slice(0,8)}...)</option>`
+      `<option value="${p.id}">${p.fecha} — ${p.estado} — ${p.total_diferencias} diferencias (${String(p.id).slice(0,8)}...)</option>`
     ).join('');
   } catch (e) {
     select.innerHTML = '<option value="">Error: ' + e + '</option>';
@@ -1613,9 +1604,6 @@ function mostrarTab(nombre) {
     if (btn) btn.classList.toggle('activeTab', t === nombre);
   });
   localStorage.setItem(TAB_STORAGE_KEY, nombre);
-  if (nombre === 'conteo') {
-    marcarConteosVistos(ultimosPendientes.map(p => p.id));
-  }
   if (nombre === 'mapeos') {
     document.getElementById('mapeosAppCard').style.display = '';
     if (mapeosAuth) cargarMapeos();
@@ -1896,7 +1884,6 @@ function iniciarApp() {
   refrescarConteosPendientes();
   cargarFrecuenciaConteo();
   mostrarTab(TABS.includes(localStorage.getItem(TAB_STORAGE_KEY)) ? localStorage.getItem(TAB_STORAGE_KEY) : 'stock');
-  setInterval(() => { if (AUTH) refrescarConteosPendientes(); }, 90000);
 }
 
 let appIniciada = false;
