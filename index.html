@@ -347,11 +347,22 @@
       <li><b>Combo</b> (A y B, ej. 61y27x4): varios componentes distintos combinados, cada uno con su propia cantidad.</li>
     </ul>
 
+    <h3>Ajuste manual de stock</h3>
+    <ol>
+      <li>En la pestaña Stock, se busca el SKU con el buscador (filtra la lista al instante).</li>
+      <li>Al lado del numero de stock hay un campo editable: se escribe el valor real y se toca "Guardar".</li>
+      <li>El sistema pide confirmacion mostrando la diferencia antes de aplicar nada.</li>
+      <li>Por dentro, esto NO pisa el numero directo: carga un movimiento de tipo "ajuste_manual" en el historial (igual que una venta o una reposicion), y el stock final se recalcula solo a partir de ese historial - asi nunca se pierde la trazabilidad de por que cambio.</li>
+      <li>Como cualquier otro cambio de stock, empuja el nuevo numero a las publicaciones no-Full de ese SKU (la confirmacion en pantalla ya no espera esa parte, sigue en segundo plano).</li>
+      <li>No se puede usar sobre un SKU compuesto (paquete o combo) - el sistema lo bloquea y dice a que componente/s ajustar en su lugar, igual que en Reposicion.</li>
+      <li>Sirve, por ejemplo, para descontar a mano ventas ya confirmadas que todavia no impactaron el stock del sistema (pedidos por Full pendientes de despachar, ventas fuera de ML, etc.).</li>
+    </ol>
+
     <h3>Reactivacion automatica</h3>
     <ol>
       <li>Mercado Libre pausa una publicacion solo cuando su stock llega a 0 (comportamiento propio de ML).</li>
       <li>Mercado Libre NO reactiva solo cuando el stock vuelve a subir - eso lo hace este sistema.</li>
-      <li>Regla: si el stock de un SKU estaba en 0 (o menos) y pasa a positivo por una reposicion, un conteo fisico o una devolucion acreditada, se reactivan automaticamente las publicaciones de ese SKU que estaban pausadas.</li>
+      <li>Regla: si el stock de un SKU estaba en 0 (o menos) y pasa a positivo por una reposicion, un conteo fisico, un ajuste manual o una devolucion acreditada, se reactivan automaticamente las publicaciones de ese SKU que estaban pausadas.</li>
       <li>Una publicacion pausada a proposito (por otro motivo, mientras ya tenia stock) NO se reactiva sola - la condicion es especificamente la transicion de 0 a positivo.</li>
       <li>Las ventas nunca reactivan (solo bajan stock, nunca lo suben).</li>
       <li>Esta regla se puede prender/apagar desde "Configuracion del sistema".</li>
@@ -466,7 +477,7 @@
       <li>Los cambios de estado (pausar/reactivar) se registran con el motivo: manual individual, manual masivo (Pausar/Reactivar todo), reactivacion automatica, o deteccion de diferencia con ML.</li>
     </ul>
 
-    <div class="fechaUpdate">Ultima actualizacion de esta seccion: 17/08/2026</div>
+    <div class="fechaUpdate">Ultima actualizacion de esta seccion: 17/09/2026</div>
   </div>
 
 
@@ -675,7 +686,12 @@ function render(rows) {
   tbody.innerHTML = rows.map(r => `
     <tr class="${r.stock_actual <= 0 ? 'low' : ''}">
       <td><div class="skuCell">${escapeHtml(r.sku)}<a class="mlLink" href="${linkMl(r.sku)}" target="_blank" rel="noopener">ver en ML</a></div></td>
-      <td class="num">${r.stock_actual}</td>
+      <td class="num">
+        <div style="display:flex; align-items:center; gap:4px;">
+          <input type="number" class="ajusteStockInput" id="ajusteStock-${cssSafe(r.sku)}" value="${r.stock_actual}" data-original="${r.stock_actual}" min="0" step="1" style="width:64px; text-align:right; margin:0; color:var(--text); font-weight:normal;" onkeydown="if(event.key==='Enter'){ event.preventDefault(); guardarAjusteStock('${r.sku}'); }">
+          <button class="expandBtn" onclick="guardarAjusteStock('${r.sku}')">Guardar</button>
+        </div>
+      </td>
       <td class="muted">${new Date(r.updated_at).toLocaleString('es-AR')}</td>
       <td>
         <div class="pubActions">
@@ -693,6 +709,56 @@ function render(rows) {
 
 function cssSafe(sku) {
   return sku.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+// ---- Ajuste manual de stock (fija stock_actual a un valor exacto, vía movimiento en el ledger) ----
+async function guardarAjusteStock(sku) {
+  const input = document.getElementById('ajusteStock-' + cssSafe(sku));
+  if (!input) return;
+  const nuevo = Number(input.value);
+  const original = Number(input.getAttribute('data-original'));
+
+  if (!Number.isInteger(nuevo) || nuevo < 0) {
+    showToast('El stock debe ser un entero mayor o igual a 0.', 'bad');
+    return;
+  }
+  if (nuevo === original) {
+    showToast(sku + ': sin cambios.', 'ok');
+    return;
+  }
+
+  const diferencia = nuevo - original;
+  const signo = diferencia > 0 ? '+' : '';
+  const confirmado = await confirmar('Vas a fijar el stock de ' + sku + ' en ' + nuevo + ' (actual: ' + original + ', diferencia: ' + signo + diferencia + '). Esto se empuja a Mercado Libre. ¿Confirmar?');
+  if (!confirmado) return;
+
+  input.disabled = true;
+  try {
+    const resp = await fetchStock(SUPABASE_BASE + '/stock-ajuste-manual', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sku, nuevo_stock: nuevo })
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      let extra = '';
+      if (Array.isArray(data.componentes)) extra = ' | ajusta en su lugar: ' + data.componentes.join(', ');
+      showToast('Error: ' + data.error + extra, 'bad');
+      input.disabled = false;
+      return;
+    }
+    if (data.sin_cambios) {
+      showToast(sku + ': sin cambios.', 'ok');
+    } else {
+      let msg = sku + ': stock ajustado a ' + data.stock_nuevo + ' (' + (data.diferencia_aplicada > 0 ? '+' : '') + data.diferencia_aplicada + '). Push a ML en curso.';
+      if (data.kits_refrescados && data.kits_refrescados.length) msg += ' Kits recalculados: ' + data.kits_refrescados.join(', ') + '.';
+      showToast(msg, 'ok');
+    }
+    await cargar();
+  } catch (e) {
+    showToast('Error de red: ' + e, 'bad');
+    input.disabled = false;
+  }
 }
 
 function actualizarContador(sku, activas, total) {
