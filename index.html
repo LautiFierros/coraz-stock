@@ -210,11 +210,13 @@
         </select>
       </div>
     </div>
-    <div style="display:flex; gap:8px; align-items:center; margin:10px 0;">
-      <select id="conteosPendientesSelect" style="flex:1;"><option value="">Cargando conteos pendientes...</option></select>
+    <div style="display:flex; gap:8px; align-items:center; margin:10px 0; flex-wrap:wrap;">
+      <select id="conteosPendientesSelect" style="flex:1; min-width:180px;"><option value="">Cargando conteos pendientes...</option></select>
       <button class="secondary" onclick="cargarConteoPendiente()">Reabrir</button>
+      <button class="danger" onclick="eliminarConteoPendiente()" title="Elimina el conteo seleccionado. Solo se pueden borrar conteos pendientes o parciales; los ya aplicados no.">&#128465; Eliminar</button>
       <button class="secondary" onclick="refrescarConteosPendientes()">&#8635;</button>
     </div>
+    <div id="conteoDeleteConfirm" style="display:none; margin:0 0 10px 0;"></div>
     <div class="fileRow">
       <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
       <button onclick="procesarArchivo()">Generar reporte de diferencias</button>
@@ -402,6 +404,7 @@
     <ol>
       <li>Entra a <b>coraz-stock</b>, arriba de todo esta la seccion "Conteo fisico...".</li>
       <li>Antes de subir nada, mira el desplegable <b>"Conteos pendientes"</b> - si ya hay uno cargado de esta misma sesion de conteo, apreta <b>"Reabrir"</b> en vez de subir el archivo de nuevo (subir dos veces el mismo conteo genera un duplicado inutil).</li>
+      <li>Si en ese desplegable quedo un conteo viejo o duplicado que no vas a usar, seleccionalo y toca <b>"&#128465; Eliminar"</b>: te pide confirmacion y borra el conteo junto con su detalle. <b>Ojo:</b> solo se pueden borrar conteos <b>pendientes o parciales</b>; los que ya estan <b>aplicados</b> (que ya movieron stock) no se pueden eliminar desde aca, y el sistema lo rechaza.</li>
       <li>Elegi el archivo XLSX y toca <b>"Generar reporte de diferencias"</b>.</li>
       <li>El sistema compara cada SKU contra el stock que tenia el sistema justo en el momento en que se escaneo ese SKU puntual (no el momento en que se sube el archivo) - por eso importa la hora de cada escaneo, no hay que ajustar nada a mano.</li>
       <li>La tabla muestra <b>Sistema</b> (lo que dice el sistema), <b>Contado</b> (lo que se escaneo) y <b>Diferencia</b> (Contado menos Sistema). Diferencia positiva = sobra stock, negativa = falta.</li>
@@ -1195,6 +1198,64 @@ async function cargarConteoPendiente() {
     renderDiferencias(data);
   } catch (e) {
     msg.textContent = 'Error cargando conteo: ' + e;
+  }
+}
+
+// ---- Eliminar un conteo pendiente/parcial desde el front ----
+// Pide el conteo seleccionado en el desplegable y muestra una confirmacion
+// inline (sin borrar de una) antes de llamar al backend stock-conteo-eliminar.
+function eliminarConteoPendiente() {
+  const select = document.getElementById('conteosPendientesSelect');
+  const conteoId = select.value;
+  if (!conteoId) { showToast('Elegi un conteo pendiente de la lista.', 'bad'); return; }
+  const label = (select.options[select.selectedIndex] && select.options[select.selectedIndex].text) || conteoId.slice(0, 8);
+  const box = document.getElementById('conteoDeleteConfirm');
+  box.style.display = 'block';
+  box.innerHTML =
+    '<div style="border:1px solid var(--red); border-radius:8px; padding:10px 12px; background:rgba(220,80,80,0.06); display:flex; gap:10px; align-items:center; flex-wrap:wrap;">' +
+      '<span style="flex:1; min-width:180px;">Vas a eliminar <b>' + escapeHtml(label) + '</b>. Se borra el conteo y su detalle. <b>No se puede deshacer.</b></span>' +
+      '<button class="danger" id="btnConfirmDelConteo">Si, eliminar</button>' +
+      '<button class="secondary" onclick="ocultarConfirmEliminarConteo()">Cancelar</button>' +
+    '</div>';
+  document.getElementById('btnConfirmDelConteo').onclick = function () { confirmarEliminarConteo(conteoId); };
+}
+
+function ocultarConfirmEliminarConteo() {
+  const box = document.getElementById('conteoDeleteConfirm');
+  box.style.display = 'none';
+  box.innerHTML = '';
+}
+
+async function confirmarEliminarConteo(conteoId) {
+  const btn = document.getElementById('btnConfirmDelConteo');
+  if (btn) { btn.disabled = true; btn.textContent = 'Eliminando...'; }
+  try {
+    const resp = await fetchStock(SUPABASE_BASE + '/stock-conteo-eliminar', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conteo_id: conteoId })
+    });
+    let data = {};
+    try { data = await resp.json(); } catch (_) { /* respuesta sin body */ }
+    if (!resp.ok || !data.ok) {
+      showToast('No se pudo eliminar: ' + (data.error || ('HTTP ' + resp.status)), 'bad');
+      if (btn) { btn.disabled = false; btn.textContent = 'Si, eliminar'; }
+      return;
+    }
+    ocultarConfirmEliminarConteo();
+    showToast('Conteo eliminado (' + (data.lineas_borradas != null ? data.lineas_borradas : 0) + ' lineas).', 'ok');
+    // Si el conteo borrado era el que estaba abierto en pantalla, limpio la vista
+    if (conteoActual && conteoActual.conteo_id === conteoId) {
+      conteoActual = null;
+      const diff = document.getElementById('diffSection');
+      if (diff) diff.style.display = 'none';
+      const cmsg = document.getElementById('conteoMsg');
+      if (cmsg) cmsg.textContent = '';
+    }
+    await refrescarConteosPendientes();
+  } catch (e) {
+    showToast('Error de red: ' + e, 'bad');
+    if (btn) { btn.disabled = false; btn.textContent = 'Si, eliminar'; }
   }
 }
 
