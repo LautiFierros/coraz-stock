@@ -491,11 +491,17 @@ async function enviarTicket(event) {
   btn.textContent = 'Generar Ticket';
 }
 
-async function cargarTickets() {
+aasync function cargarTickets() {
   const tbody = document.getElementById('tbody-tickets');
   tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;">Cargando...</td></tr>';
   
   try {
+    // 1. Saber quién está logueado
+    const { data: userSession } = await sb.auth.getSession();
+    const userEmail = userSession?.session?.user?.email;
+    const isAdmin = userEmail === 'corazautopartes@gmail.com';
+
+    // 2. Traer los tickets de Supabase
     const { data, error } = await sb.from('tickets')
       .select('*')
       .order('created_at', { ascending: false })
@@ -507,6 +513,59 @@ async function cargarTickets() {
       tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;" class="muted">No hay tickets recientes.</td></tr>';
       return;
     }
+
+    // 3. Dibujar la tabla
+    tbody.innerHTML = data.map(t => {
+      const colorTipo = t.tipo === 'error' ? 'var(--red)' : 'var(--green)';
+      const badgeEstado = t.estado === 'pendiente' ? 'pendiente' : (t.estado === 'resuelto' ? 'aplicado' : 'parcial');
+      const txtEstado = t.estado ? t.estado.toUpperCase() : 'PENDIENTE';
+      
+      let estadoHtml = '';
+      
+      // Si es admin, renderiza el selector. Si no, solo el texto.
+      if (isAdmin) {
+        estadoHtml = `
+          <select onchange="cambiarEstadoTicket(${t.id}, this.value)" style="padding:4px 8px; font-size:11px; font-weight:bold; border-radius:6px; background:var(--card2); color:var(--text); border:1px solid var(--border); cursor:pointer;">
+            <option value="pendiente" ${t.estado === 'pendiente' ? 'selected' : ''}>PENDIENTE</option>
+            <option value="en revision" ${t.estado === 'en revision' ? 'selected' : ''}>EN REVISIÓN</option>
+            <option value="resuelto" ${t.estado === 'resuelto' ? 'selected' : ''}>RESUELTO</option>
+            <option value="rechazado" ${t.estado === 'rechazado' ? 'selected' : ''}>RECHAZADO</option>
+          </select>`;
+      } else {
+        estadoHtml = `<span class="badge ${badgeEstado}">${txtEstado}</span>`;
+      }
+
+      return `
+        <tr style="border-bottom:1px solid var(--border);">
+          <td class="muted" style="white-space:nowrap;">${new Date(t.created_at).toLocaleString('es-AR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}</td>
+          <td style="color:${colorTipo}; font-weight:600; text-transform:uppercase;">${t.tipo}</td>
+          <td>
+            ${escapeHtml(t.asunto)}
+            <div style="font-size:11px; color:var(--muted); margin-top:2px;">Reportado por: ${escapeHtml(t.user_email || 'Desconocido')}</div>
+          </td>
+          <td>${estadoHtml}</td>
+        </tr>`;
+    }).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="4" style="padding:12px; color:var(--red);">Error: ${e.message}</td></tr>`;
+  }
+}
+
+async function cambiarEstadoTicket(id, nuevoEstado) {
+  try {
+    const { error } = await sb.from('tickets')
+      .update({ estado: nuevoEstado })
+      .eq('id', id);
+
+    if (error) throw error;
+
+    showToast('Estado del ticket actualizado a ' + nuevoEstado.toUpperCase(), 'ok');
+    cargarTickets(); // Refresca para acomodar los colores
+  } catch (e) {
+    showToast('Error al actualizar estado: ' + e.message, 'bad');
+    cargarTickets(); // Refresca para volver al estado anterior si falló
+  }
+}
 
     tbody.innerHTML = data.map(t => {
       const colorTipo = t.tipo === 'error' ? 'var(--red)' : 'var(--green)';
