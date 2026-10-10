@@ -287,7 +287,7 @@
       </div>
       <div id="diffWrap">
         <table>
-          <thead><tr><th></th><th>SKU</th><th>Titulo</th><th>Sistema</th><th>Contado</th><th>Diferencia</th></tr></thead>
+          <thead><tr><th></th><th>SKU</th><th>Titulo</th><th>Sistema</th><th>Contado</th><th title="Unidades de este SKU ya vendidas pero que todavia estan fisicamente en la gondola (sin despachar)">Sin despachar</th><th>Diferencia</th></tr></thead>
           <tbody id="diffTbody"></tbody>
         </table>
       </div>
@@ -410,6 +410,7 @@
       <li>Como cualquier otro cambio de stock, empuja el nuevo numero a las publicaciones no-Full de ese SKU (la confirmacion en pantalla ya no espera esa parte, sigue en segundo plano).</li>
       <li>No se puede usar sobre un SKU compuesto (paquete o combo) - el sistema lo bloquea y dice a que componente/s ajustar en su lugar, igual que en Reposicion.</li>
       <li>Sirve, por ejemplo, para descontar a mano ventas ya confirmadas que todavia no impactaron el stock del sistema (pedidos por Full pendientes de despachar, ventas fuera de ML, etc.).</li>
+      <li><b>Re-sincronizar ML:</b> si el stock de un SKU ya esta bien en el sistema pero Mercado Libre (o los kits que lo incluyen) quedo con un numero viejo - por ejemplo porque el stock se corrigio por otro camino, o porque el ajuste dio "sin cambios" y no empujo nada - usa el boton <b>"Re-sincronizar ML"</b> de esa fila. Recalcula los kits que incluyen ese SKU desde sus componentes y publica de nuevo el numero vigente en todas las publicaciones no-Full. No cambia el stock ni toca el historial.</li>
     </ol>
 
     <h3>Reactivacion automatica</h3>
@@ -459,7 +460,8 @@
       <li>Si en ese desplegable quedo un conteo viejo o duplicado que no vas a usar, seleccionalo y toca <b>"&#128465; Eliminar"</b>: te pide confirmacion y borra el conteo junto con su detalle. <b>Ojo:</b> solo se pueden borrar conteos <b>pendientes o parciales</b>; los que ya estan <b>aplicados</b> (que ya movieron stock) no se pueden eliminar desde aca, y el sistema lo rechaza.</li>
       <li>Elegi el archivo XLSX y toca <b>"Generar reporte de diferencias"</b>.</li>
       <li>El sistema compara cada SKU contra el stock que tenia el sistema justo en el momento en que se escaneo ese SKU puntual (no el momento en que se sube el archivo) - por eso importa la hora de cada escaneo, no hay que ajustar nada a mano.</li>
-      <li>La tabla muestra <b>Sistema</b> (lo que dice el sistema), <b>Contado</b> (lo que se escaneo) y <b>Diferencia</b> (Contado menos Sistema). Diferencia positiva = sobra stock, negativa = falta.</li>
+      <li>La tabla muestra <b>Sistema</b> (lo que dice el sistema), <b>Contado</b> (lo que se escaneo), <b>Sin despachar</b> y <b>Diferencia</b> (Contado menos Sin despachar menos Sistema). Diferencia positiva = sobra stock, negativa = falta.</li>
+      <li><b>Sin despachar:</b> el sistema descuenta una venta apenas se cobra, pero las unidades siguen fisicamente en la gondola hasta que se despachan, y el conteo las ve. Si al contar habia ventas cobradas sin despachar, anotá en esa columna cuantas unidades de ese SKU eran (ej: 2 ventas del pack x4 = 8). Se restan de lo contado antes de calcular la diferencia, asi el stock queda bien una vez que se despachen. Si no habia nada pendiente, dejalo en 0.</li>
     </ol>
 
     <p><b>5) Diferencia grande o rara: doble chequeo antes de aplicar</b></p>
@@ -859,6 +861,7 @@ function render(rows) {
       <td class="muted">${new Date(r.updated_at).toLocaleString('es-AR')}</td>
       <td>
         <div class="pubActions">
+          <button class="expandBtn" onclick="resincronizarSku('${r.sku}', this)" title="Vuelve a publicar en ML el stock de este SKU y recalcula los kits que lo incluyen (no cambia el stock)">Re-sincronizar ML</button>
           <button class="expandBtn" onclick="togglePublicaciones('${r.sku}', this)">Publicaciones</button>
           <button class="expandBtn" onclick="pausarTodo('${r.sku}', this)">Pausar todo</button>
           <button class="expandBtn" onclick="reactivarTodo('${r.sku}', this)">Reactivar todo</button>
@@ -873,6 +876,35 @@ function render(rows) {
 
 function cssSafe(sku) {
   return sku.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+// Vuelve a publicar en ML el stock de un SKU y de todos los kits que lo incluyen, sin cambiar el stock.
+// Sirve cuando el numero ya esta bien en el sistema pero ML (o un kit) quedo desfasado.
+async function resincronizarSku(sku, btn) {
+  const confirmado = await confirmar('Vas a re-sincronizar con Mercado Libre el stock de ' + sku + ' y de todos los kits que lo incluyen (los kits se recalculan desde sus componentes). No cambia el stock, solo lo vuelve a publicar. ¿Confirmar?');
+  if (!confirmado) return;
+  const textoOriginal = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Sincronizando...'; }
+  try {
+    const resp = await fetchStock(SUPABASE_BASE + '/stock-resync-sku', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skus: [sku] })
+    });
+    const data = await resp.json();
+    if (data.error || !data.resumen) {
+      showToast('Error: ' + (data.error || 'respuesta inesperada'), 'bad');
+    } else {
+      const kits = (data.kits_refrescados || []).length;
+      let msg = sku + ': re-sincronizado. ' + data.resumen.publicaciones_ok + ' publicaciones actualizadas en ML' + (kits ? ', ' + kits + ' kits recalculados' : '') + '.';
+      if (data.resumen.publicaciones_con_error > 0) msg += ' OJO: ' + data.resumen.publicaciones_con_error + ' publicaciones dieron error en ML, revisar.';
+      showToast(msg, data.resumen.publicaciones_con_error > 0 ? 'bad' : 'ok');
+    }
+    await cargar();
+  } catch (e) {
+    showToast('Error de red: ' + e, 'bad');
+  }
+  if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
 }
 
 async function guardarAjusteStock(sku) {
@@ -1501,7 +1533,8 @@ function renderDiferencias(data) {
   }
 
   section.style.display = 'block';
-  summary.innerHTML = noEscaneadosHtml + data.total_diferencias + ' diferencias encontradas (conteo ' + String(data.conteo_id).slice(0, 8) + '...)';
+  summary.innerHTML = noEscaneadosHtml + data.total_diferencias + ' diferencias encontradas (conteo ' + String(data.conteo_id).slice(0, 8) + '...)' +
+    '<div class="muted" style="margin-top:6px;">Si hay ventas ya cobradas cuyas unidades siguen en la gondola sin despachar, anotalas en <b>Sin despachar</b> (en unidades de ese SKU: 2 packs x4 = 8). Se restan de lo contado antes de calcular la diferencia.</div>';
 
   tbody.innerHTML = data.diferencias.map(d => {
     const cls = d.diferencia < 0 ? 'falta' : 'sobra';
@@ -1512,6 +1545,7 @@ function renderDiferencias(data) {
       <td style="max-width:280px;font-size:0.85em;">${tituloTxt}</td>
       <td class="num">${d.stock_sistema}</td>
       <td class="num"><input type="number" class="inputContado" value="${d.stock_contado}" style="width:70px; text-align:right;" oninput="recalcularDiferenciaFila(this)"></td>
+      <td class="num"><input type="number" class="inputPendiente" value="0" min="0" step="1" style="width:70px; text-align:right;" oninput="recalcularDiferenciaFila(this)"></td>
       <td class="num diff" id="diffCell-${d.sku}">${d.diferencia > 0 ? '+' : ''}${d.diferencia}</td>
     </tr>`;
   }).join('');
@@ -1520,14 +1554,20 @@ function renderDiferencias(data) {
 function recalcularDiferenciaFila(input) {
   const tr = input.closest('tr');
   const sistema = Number(tr.getAttribute('data-sistema'));
-  const contado = Number(input.value);
+  const contadoEl = tr.querySelector('.inputContado');
+  const pendienteEl = tr.querySelector('.inputPendiente');
+  const contado = Number(contadoEl.value);
+  const pendiente = pendienteEl ? Number(pendienteEl.value || 0) : 0;
   const cell = tr.querySelector('[id^="diffCell-"]');
-  if (!Number.isFinite(contado)) { cell.textContent = '?'; return; }
-  const diferencia = contado - sistema;
+  if (!Number.isFinite(contado) || !Number.isFinite(pendiente) || pendiente < 0) { cell.textContent = '?'; return; }
+  // lo vendido y todavia sin despachar sigue fisicamente en la gondola pero el sistema ya lo descontó:
+  // el stock real disponible es contado - sin despachar.
+  const diferencia = (contado - pendiente) - sistema;
   cell.textContent = (diferencia > 0 ? '+' : '') + diferencia;
   tr.classList.remove('falta', 'sobra');
   tr.classList.add(diferencia < 0 ? 'falta' : 'sobra');
-  input.style.fontWeight = (contado !== Number(input.defaultValue)) ? 'bold' : 'normal';
+  contadoEl.style.fontWeight = (contado !== Number(contadoEl.defaultValue)) ? 'bold' : 'normal';
+  if (pendienteEl) pendienteEl.style.fontWeight = pendiente > 0 ? 'bold' : 'normal';
 }
 
 function toggleTodos(marcar) {
@@ -1540,17 +1580,32 @@ async function aplicarSeleccionados() {
   const filas = document.querySelectorAll('#diffTbody tr');
   const skus = [];
   const correcciones = {};
+  const pendientesPorSku = {};
+  const errores = [];
   filas.forEach(tr => {
     const chk = tr.querySelector('.chkDiff');
     const sku = tr.getAttribute('data-sku');
     const input = tr.querySelector('.inputContado');
+    const pendienteEl = tr.querySelector('.inputPendiente');
     if (input) {
       const valor = Number(input.value);
-      if (Number.isFinite(valor)) correcciones[sku] = Math.round(valor);
+      const pendiente = pendienteEl ? Number(pendienteEl.value || 0) : 0;
+      if (Number.isFinite(valor)) {
+        if (!Number.isInteger(pendiente) || pendiente < 0) {
+          if (chk.checked) errores.push(sku + ': "Sin despachar" tiene que ser un entero mayor o igual a 0');
+        } else if (valor - pendiente < 0) {
+          if (chk.checked) errores.push(sku + ': "Sin despachar" (' + pendiente + ') es mayor que lo contado (' + valor + ')');
+        } else {
+          // el contado que se aplica es el neto: lo fisicamente contado menos lo vendido sin despachar
+          correcciones[sku] = Math.round(valor - pendiente);
+          if (pendiente > 0) pendientesPorSku[sku] = pendiente;
+        }
+      }
     }
     if (chk.checked) skus.push(sku);
   });
 
+  if (errores.length > 0) { msg.textContent = 'Revisá antes de aplicar: ' + errores.join(' | '); return; }
   if (skus.length === 0) { msg.textContent = 'No marcaste ningun SKU para aplicar.'; return; }
 
   const btn = document.getElementById('aplicarBtn');
@@ -1567,6 +1622,10 @@ async function aplicarSeleccionados() {
     if (!data.ok) { msg.textContent = 'Error: ' + data.error; btn.disabled = false; return; }
 
     msg.textContent = 'Aplicado: ' + data.aplicadas + ' SKUs actualizados (' + (data.skus_actualizados || []).join(', ') + '). Estado del conteo: ' + data.estado_conteo + '.';
+    const conPendientes = skus.filter(s => pendientesPorSku[s] > 0);
+    if (conPendientes.length > 0) {
+      msg.textContent += ' Se descontaron unidades vendidas sin despachar: ' + conPendientes.map(s => s + ' (' + pendientesPorSku[s] + ')').join(', ') + '.';
+    }
     if (data.recalculos && data.recalculos.length > 0) {
       const manuales = data.recalculos.filter(r => r.motivo === 'correccion_manual');
       const tardias = data.recalculos.filter(r => r.motivo !== 'correccion_manual');
