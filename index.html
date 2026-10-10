@@ -461,7 +461,7 @@
       <li>Elegi el archivo XLSX y toca <b>"Generar reporte de diferencias"</b>.</li>
       <li>El sistema compara cada SKU contra el stock que tenia el sistema justo en el momento en que se escaneo ese SKU puntual (no el momento en que se sube el archivo) - por eso importa la hora de cada escaneo, no hay que ajustar nada a mano.</li>
       <li>La tabla muestra <b>Sistema</b> (lo que dice el sistema), <b>Contado</b> (lo que se escaneo), <b>Sin despachar</b> y <b>Diferencia</b> (Contado menos Sin despachar menos Sistema). Diferencia positiva = sobra stock, negativa = falta.</li>
-      <li><b>Sin despachar:</b> el sistema descuenta una venta apenas se cobra, pero las unidades siguen fisicamente en la gondola hasta que se despachan, y el conteo las ve. Si al contar habia ventas cobradas sin despachar, anotá en esa columna cuantas unidades de ese SKU eran (ej: 2 ventas del pack x4 = 8). Se restan de lo contado antes de calcular la diferencia, asi el stock queda bien una vez que se despachen. Si no habia nada pendiente, dejalo en 0.</li>
+      <li><b>Sin despachar:</b> el sistema descuenta una venta apenas se cobra, pero las unidades siguen fisicamente en la gondola hasta que se despachan, y el conteo las ve. La columna se completa sola leyendo en Mercado Libre el estado de cada envio: cuenta como "sin despachar" toda venta cobrada cuya <b>etiqueta todavia no se imprimio</b> (ej: 2 ventas del pack x4 = 8 u.). Se restan de lo contado antes de calcular la diferencia, asi el stock queda bien una vez que se despachen. Podes corregir el numero a mano; si ML no responde, se carga en 0 y avisa.</li>
     </ol>
 
     <p><b>5) Diferencia grande o rara: doble chequeo antes de aplicar</b></p>
@@ -1533,20 +1533,37 @@ function renderDiferencias(data) {
   }
 
   section.style.display = 'block';
-  summary.innerHTML = noEscaneadosHtml + data.total_diferencias + ' diferencias encontradas (conteo ' + String(data.conteo_id).slice(0, 8) + '...)' +
-    '<div class="muted" style="margin-top:6px;">Si hay ventas ya cobradas cuyas unidades siguen en la gondola sin despachar, anotalas en <b>Sin despachar</b> (en unidades de ese SKU: 2 packs x4 = 8). Se restan de lo contado antes de calcular la diferencia.</div>';
+  const autoOk = !data.sin_despachar_error;
+  const totalAuto = data.diferencias.reduce((a, d) => a + (d.sin_despachar_sugerido || 0), 0);
+  const hayIndet = data.diferencias.some(d => (d.sin_despachar_indeterminadas || 0) > 0);
+  const avisoAuto = autoOk
+    ? '<div class="muted" style="margin-top:6px;"><b>Sin despachar</b> se completa solo: son las unidades de ventas ya cobradas cuya etiqueta de envio todavia no se imprimio (siguen en la gondola). ' +
+      (totalAuto > 0 ? 'Se detectaron ' + totalAuto + ' u. en total. ' : 'No se detectaron ventas sin despachar. ') +
+      'Podes corregirlo a mano si hace falta. Se restan de lo contado antes de calcular la diferencia.</div>' +
+      (hayIndet ? '<div class="muted" style="margin-top:4px;color:#b45309;">Hay envios cuyo estado no se pudo leer (marcados con ⚠). Revisalos a mano.</div>' : '')
+    : '<div class="muted" style="margin-top:6px;color:#b45309;">No se pudo leer el estado de los envios en Mercado Libre (' + escapeHtml(String(data.sin_despachar_error)) + '). Anotá <b>Sin despachar</b> a mano si hay ventas cobradas con las unidades todavia en la gondola (2 packs x4 = 8).</div>';
+  summary.innerHTML = noEscaneadosHtml + data.total_diferencias + ' diferencias encontradas (conteo ' + String(data.conteo_id).slice(0, 8) + '...)' + avisoAuto;
 
   tbody.innerHTML = data.diferencias.map(d => {
-    const cls = d.diferencia < 0 ? 'falta' : 'sobra';
     const tituloTxt = d.titulo ? escapeHtml(d.titulo) : '<span style="color:#999">sin publicacion ni combo</span>';
+    const sugerido = Math.max(0, Math.min(Number(d.sin_despachar_sugerido || 0), Number(d.stock_contado)));
+    const diferenciaNeta = (d.stock_contado - sugerido) - d.stock_sistema;
+    const cls = diferenciaNeta < 0 ? 'falta' : 'sobra';
+    const detalleOrdenes = (d.ordenes_sin_despachar || []).map(o => o.unidades + ' u. (orden ' + o.orden + ', ' + (o.envio || '') + (o.subestado ? '/' + o.subestado : '') + ')').join('; ');
+    const notaAuto = sugerido > 0
+      ? `<div class="muted" style="font-size:0.75em;" title="${escapeHtml(detalleOrdenes)}">auto: ${(d.ordenes_sin_despachar || []).length} venta(s)</div>`
+      : '';
+    const notaIndet = (d.sin_despachar_indeterminadas || 0) > 0
+      ? `<div style="font-size:0.75em;color:#b45309;" title="No se pudo leer el estado del envio de ${d.sin_despachar_indeterminadas} venta(s) de este SKU">⚠ ${d.sin_despachar_indeterminadas} sin leer</div>`
+      : '';
     return `<tr class="${cls}" data-sku="${d.sku}" data-sistema="${d.stock_sistema}">
       <td><input type="checkbox" class="chkDiff" checked></td>
       <td>${d.sku}</td>
       <td style="max-width:280px;font-size:0.85em;">${tituloTxt}</td>
       <td class="num">${d.stock_sistema}</td>
       <td class="num"><input type="number" class="inputContado" value="${d.stock_contado}" style="width:70px; text-align:right;" oninput="recalcularDiferenciaFila(this)"></td>
-      <td class="num"><input type="number" class="inputPendiente" value="0" min="0" step="1" style="width:70px; text-align:right;" oninput="recalcularDiferenciaFila(this)"></td>
-      <td class="num diff" id="diffCell-${d.sku}">${d.diferencia > 0 ? '+' : ''}${d.diferencia}</td>
+      <td class="num"><input type="number" class="inputPendiente" value="${sugerido}" min="0" step="1" style="width:70px; text-align:right;${sugerido > 0 ? 'font-weight:bold;' : ''}" oninput="recalcularDiferenciaFila(this)">${notaAuto}${notaIndet}</td>
+      <td class="num diff" id="diffCell-${d.sku}">${diferenciaNeta > 0 ? '+' : ''}${diferenciaNeta}</td>
     </tr>`;
   }).join('');
 }
