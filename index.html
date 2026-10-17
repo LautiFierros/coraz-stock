@@ -307,6 +307,14 @@
         <option value="envio_full">Envio a Full (restar stock de gondola)</option>
       </select>
     </div>
+    <div id="repoPdfBox" style="display:none; margin-bottom:12px; padding:10px 12px; background:var(--card2); border:1px solid var(--border); border-radius:10px;">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <button class="secondary" type="button" style="width:auto; padding:8px 14px; font-size:13px;" onclick="document.getElementById('repoPdfInput').click()">📄 Importar PDF del envío Full</button>
+        <span class="muted">El PDF "Listado de productos e instrucciones de preparación" que descargás de ML al crear el envío.</span>
+      </div>
+      <input type="file" id="repoPdfInput" accept="application/pdf,.pdf" style="display:none;" onchange="importarPdfFull(this)">
+      <div id="repoPdfMsg" style="margin-top:8px;"></div>
+    </div>
     <div id="repoFilas"></div>
     <button class="secondary" type="button" style="width:auto; padding:8px 14px; font-size:13px;" onclick="agregarFilaRepo()">+ Agregar fila</button>
     <div style="margin-top:12px;">
@@ -1196,6 +1204,8 @@ function actualizarModoRepo() {
   const modo = document.getElementById('repoModo').value;
   const desc = document.getElementById('repoDesc');
   const btn = document.getElementById('repoBtn');
+  const pdfBox = document.getElementById('repoPdfBox');
+  if (pdfBox) pdfBox.style.display = modo === 'envio_full' ? 'block' : 'none';
   if (modo === 'envio_full') {
     desc.textContent = 'Carga uno o varios SKU que se van a mandar fisicamente a Full. Se descuenta del stock de gondola. La nota se aplica a todos.';
     btn.textContent = 'Descontar stock (enviar a Full)';
@@ -1245,6 +1255,9 @@ async function reponer() {
       document.getElementById('repoFilas').innerHTML = '';
       agregarFilaRepo();
       document.getElementById('repoNota').value = '';
+      pdfFullEstado = null;
+      const pdfMsg = document.getElementById('repoPdfMsg');
+      if (pdfMsg) pdfMsg.innerHTML = '';
       await cargar();
     } else {
       let extra = '';
@@ -1257,6 +1270,179 @@ async function reponer() {
     msg.textContent = 'Error de red: ' + e;
   }
   if (btn) btn.disabled = false;
+}
+
+// ---- Importar PDF de envio Full (ML) ----
+// Lee el PDF "Listado de productos e instrucciones de preparacion", suma lineas repetidas,
+// convierte kits a componentes (en el backend) y precarga las filas del envio a Full.
+// No descuenta nada: la carga real sigue siendo el boton "Descontar stock (enviar a Full)".
+const PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+let _pdfjsPromise = null;
+function cargarPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (!_pdfjsPromise) {
+    _pdfjsPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = PDFJS_URL;
+      s.onload = () => {
+        if (!window.pdfjsLib) { _pdfjsPromise = null; return reject(new Error('el lector de PDF no cargo')); }
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+        resolve(window.pdfjsLib);
+      };
+      s.onerror = () => { _pdfjsPromise = null; reject(new Error('no se pudo descargar el lector de PDF (revisa la conexion)')); };
+      document.head.appendChild(s);
+    });
+  }
+  return _pdfjsPromise;
+}
+
+async function leerPaginasPdf(file) {
+  const lib = await cargarPdfJs();
+  const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const paginas = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const tc = await (await doc.getPage(p)).getTextContent();
+    paginas.push(tc.items.map((i) => ({ str: i.str, x: i.transform[4], y: i.transform[5] })));
+  }
+  return paginas;
+}
+
+// paginas = [[{str, x, y}]] (coordenadas PDF, y hacia arriba) -> { envio, totalUnidades, totalProductos, productos:[{codigoMl, sku, titulo, unidades}] }
+function parsearPdfFull(paginas) {
+  const norm = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const todo = norm(paginas.map((p) => p.map((i) => i.str).join(' ')).join(' '));
+  const envio = (todo.match(/Envio\s*#\s*(\d+)/i) || [])[1] || null;
+  const totalUnidades = Number((todo.match(/Total de unidades:\s*(\d+)/i) || [])[1] || NaN);
+  const totalProductos = Number((todo.match(/Productos del envio:\s*(\d+)/i) || [])[1] || NaN);
+  const productos = [];
+  let xUnid = null, xIdent = null;
+  for (const pagina of paginas) {
+    const items = pagina.filter((i) => String(i.str).trim() !== '');
+    const hU = items.find((i) => norm(i.str).trim().toUpperCase() === 'UNIDADES');
+    const hI = items.find((i) => norm(i.str).trim().toUpperCase() === 'IDENTIFICACION');
+    if (hU) xUnid = hU.x;
+    if (hI) xIdent = hI.x;
+    if (xUnid === null) continue;
+    const limiteUnid = xIdent !== null ? xIdent - 5 : xUnid + 60;
+    const unidades = items.filter((i) => /^\d+$/.test(String(i.str).trim()) && i.x >= xUnid - 5 && i.x < limiteUnid);
+    const lineas = [];
+    for (const it of items.filter((i) => i.x < xUnid - 5).sort((a, b) => b.y - a.y || a.x - b.x)) {
+      const l = lineas.find((ln) => Math.abs(ln.y - it.y) <= 2);
+      if (l) l.items.push(it); else lineas.push({ y: it.y, items: [it] });
+    }
+    for (const l of lineas) l.texto = l.items.sort((a, b) => a.x - b.x).map((i) => i.str).join(' ').replace(/\s+/g, ' ').trim();
+    lineas.sort((a, b) => b.y - a.y);
+    const inicios = lineas.map((l, idx) => (/^Codigo ML\s*:/i.test(norm(l.texto)) ? idx : -1)).filter((i) => i >= 0);
+    inicios.forEach((ini, k) => {
+      const fin = k + 1 < inicios.length ? inicios[k + 1] : lineas.length;
+      const filaLineas = lineas.slice(ini, fin);
+      const yTop = lineas[ini].y + 3;
+      const yBottom = fin < lineas.length ? lineas[fin].y + 3 : -Infinity;
+      const cand = unidades.filter((u) => u.y <= yTop && u.y > yBottom).sort((a, b) => b.y - a.y);
+      const codigoMl = (norm(filaLineas.map((l) => l.texto).join('\n')).match(/Codigo ML:\s*(\S+)/i) || [])[1] || null;
+      let sku = null, idxSku = -1;
+      filaLineas.forEach((l, j) => { if (sku === null && /SKU:/i.test(l.texto)) { sku = l.texto.split(/SKU:/i)[1].trim(); idxSku = j; } });
+      const titulo = idxSku >= 0 ? filaLineas.slice(idxSku + 1).map((l) => l.texto).join(' ').trim() : '';
+      productos.push({ codigoMl, sku: sku || null, titulo, unidades: cand.length ? Number(String(cand[0].str).trim()) : null });
+    });
+  }
+  return { envio, totalUnidades, totalProductos, productos };
+}
+
+let pdfFullEstado = null; // { r, pv, cuadra, suma, descontarPrevios }
+
+async function importarPdfFull(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const box = document.getElementById('repoPdfMsg');
+  box.innerHTML = '<span class="muted">Leyendo PDF...</span>';
+  try {
+    const r = parsearPdfFull(await leerPaginasPdf(file));
+    if (r.productos.length === 0) throw new Error('no encontre productos. ¿Es el PDF de preparacion del envio Full?');
+    const incompletos = r.productos.filter((p) => !p.sku || !p.unidades);
+    if (incompletos.length) throw new Error('no pude leer SKU o unidades de: ' + incompletos.map((p) => p.codigoMl || p.titulo || '?').join(', ') + '. Cargalo a mano.');
+    const suma = r.productos.reduce((a, p) => a + p.unidades, 0);
+    const cuadra = (Number.isNaN(r.totalUnidades) || suma === r.totalUnidades) && (Number.isNaN(r.totalProductos) || r.productos.length === r.totalProductos);
+    box.innerHTML = '<span class="muted">Calculando contra el stock...</span>';
+    const resp = await fetchStock(SUPABASE_BASE + '/stock-envio-full-preview', {
+      method: 'POST',
+      headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ envio: r.envio, items: r.productos.map((p) => ({ sku: p.sku, cantidad: p.unidades })) })
+    });
+    const pv = await resp.json();
+    if (!pv.ok) throw new Error(pv.error || 'no se pudo calcular la vista previa');
+    pdfFullEstado = { r, pv, cuadra, suma, descontarPrevios: false };
+    renderPdfFull();
+  } catch (e) {
+    pdfFullEstado = null;
+    box.innerHTML = '<span style="color:var(--red);">Error: ' + escapeHtml(String(e && e.message ? e.message : e)) + '</span>';
+  }
+}
+
+function togglePreviosPdfFull(chk) {
+  if (!pdfFullEstado) return;
+  pdfFullEstado.descontarPrevios = !!chk.checked;
+  renderPdfFull();
+}
+
+function renderPdfFull() {
+  const st = pdfFullEstado;
+  const box = document.getElementById('repoPdfMsg');
+  if (!st || !box) return;
+  const { r, pv, cuadra, suma } = st;
+  const sumaPorSku = (lista) => {
+    const m = {};
+    for (const x of (lista || [])) m[x.sku] = (m[x.sku] || 0) + Math.abs(Number(x.cantidad) || 0);
+    return m;
+  };
+  const yaEste = sumaPorSku(pv.ya_cargado);
+  const previos = sumaPorSku(pv.envios_recientes_sin_numero);
+  const filas = pv.componentes.map((c) => {
+    const ya = (yaEste[c.sku] || 0) + (st.descontarPrevios ? (previos[c.sku] || 0) : 0);
+    const pendiente = Math.max(0, c.cantidad - ya);
+    const queda = c.stock_actual === null ? null : c.stock_actual - pendiente;
+    return { ...c, ya, pendiente, queda };
+  });
+
+  // de donde sale cada componente cuando viene de un kit (ej. "35x2 ×10")
+  const origenTxt = (c) => c.origen.filter((o) => o.por_unidad > 1 || o.sku_pdf !== c.sku).map((o) => `${escapeHtml(o.sku_pdf)} ×${o.cantidad_pdf}`).join(' + ');
+  let html = `<div style="margin-bottom:6px;"><b>Envío Full #${escapeHtml(r.envio || '?')}</b> · ${r.productos.length} línea(s) · ${suma} unidades en el PDF</div>`;
+  if (!cuadra) html += `<div style="color:var(--red); margin-bottom:6px;">⚠ El PDF dice ${Number.isNaN(r.totalProductos) ? '?' : r.totalProductos} productos y ${Number.isNaN(r.totalUnidades) ? '?' : r.totalUnidades} unidades, pero leí ${r.productos.length} y ${suma}. Revisá las filas antes de descontar.</div>`;
+  html += '<div style="overflow-x:auto;"><table style="font-size:12px;"><thead><tr><th style="padding:6px 4px;">SKU</th><th style="padding:6px 4px;">PDF</th><th style="padding:6px 4px;">Ya</th><th style="padding:6px 4px;">Góndola</th><th style="padding:6px 4px;">Desc.</th><th style="padding:6px 4px;">Queda</th></tr></thead><tbody>';
+  for (const f of filas) {
+    const kit = origenTxt(f);
+    const rojo = f.sku_desconocido || (f.queda !== null && f.queda < 0);
+    html += `<tr><td style="padding:6px 4px;"><b>${escapeHtml(f.sku)}</b>${kit ? '<br><span class="muted">' + kit + '</span>' : ''}</td>` +
+      `<td class="num" style="padding:6px 4px;">${f.cantidad}</td>` +
+      `<td class="num" style="padding:6px 4px;">${f.ya || '–'}</td>` +
+      `<td class="num" style="padding:6px 4px;">${f.stock_actual === null ? '?' : f.stock_actual}</td>` +
+      `<td class="num" style="padding:6px 4px;">${f.pendiente}</td>` +
+      `<td class="num" style="padding:6px 4px;${rojo ? 'color:var(--red);' : ''}">${f.sku_desconocido ? 'SKU sin stock cargado' : f.queda}</td></tr>`;
+  }
+  html += '</tbody></table></div>';
+
+  if (pv.kits_convertidos && pv.kits_convertidos.length) html += `<div class="muted" style="margin-top:6px;">Kits pasados a sus componentes: ${pv.kits_convertidos.map(escapeHtml).join(', ')}.</div>`;
+  if (pv.ya_cargado && pv.ya_cargado.length) html += `<div style="color:var(--amber); margin-top:6px;">⚠ Este envío ya tiene cargas registradas con su número. Solo se precarga lo que falta.</div>`;
+  if (pv.envios_recientes_sin_numero && pv.envios_recientes_sin_numero.length) {
+    const det = pv.envios_recientes_sin_numero.map((m) => `${escapeHtml(m.sku)}: ${Math.abs(m.cantidad)} u el ${new Date(m.fecha).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`).join(' · ');
+    html += `<div style="margin-top:6px; color:var(--amber);">⚠ Envíos a Full cargados a mano en los últimos 7 días para estos SKUs, sin número de envío: ${det}</div>` +
+      `<label style="display:flex; gap:8px; align-items:center; margin-top:4px; font-size:13px;"><input type="checkbox" style="width:auto; margin:0;" ${st.descontarPrevios ? 'checked' : ''} onchange="togglePreviosPdfFull(this)"> Eran parte de este envío: restarlas de lo que falta descontar</label>`;
+  }
+  if (filas.some((f) => f.sku_desconocido)) html += `<div style="color:var(--red); margin-top:6px;">⚠ Hay SKUs que no existen en el stock. Revisalos antes de descontar.</div>`;
+  if (filas.some((f) => !f.sku_desconocido && f.queda < 0)) html += `<div style="color:var(--red); margin-top:6px;">⚠ No alcanza el stock de góndola para algún SKU: el sistema va a rechazar la carga. Revisá el conteo o ajustá las cantidades.</div>`;
+
+  const aCargar = filas.filter((f) => f.pendiente > 0);
+  if (aCargar.length === 0) html += `<div style="color:var(--green); margin-top:8px;"><b>✓ Este envío ya está cargado completo.</b> No hay nada para descontar.</div>`;
+  else html += `<div class="muted" style="margin-top:8px;">Precargué ${aCargar.length} fila(s) abajo. Revisalas y tocá <b>Descontar stock (enviar a Full)</b>.</div>`;
+  box.innerHTML = '<div style="font-size:13px; line-height:1.4;">' + html + '</div>';
+
+  const cont = document.getElementById('repoFilas');
+  cont.innerHTML = '';
+  for (const f of aCargar) agregarFilaRepo(f.sku, f.pendiente);
+  if (aCargar.length === 0) agregarFilaRepo();
+  if (r.envio) document.getElementById('repoNota').value = 'Envio Full #' + r.envio;
 }
 
 function encontrarColumnas(headers) {
